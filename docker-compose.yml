@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  # Model API сервис (FastAPI)
+  model-api:
+    build:
+      context: .
+      dockerfile: model/Dockerfile
+    container_name: ai-gigaschool-model
+    ports:
+      - "8000:8000"
+    # Загружаем переменные из model/.env
+    env_file:
+      - .env
+    environment:
+      # Yandex Cloud (переменные загружаются из model/.env, но можно переопределить)
+      - LLM_PROVIDER=${LLM_PROVIDER:-yandex}
+      # OpenAI (если используется)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Anthropic (если используется)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Google (если используется)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      # Web Search API URL (для подключения к tavily-adapter)
+      - WEB_SEARCH_API_URL=http://tavily-adapter:1000
+    volumes:
+      # Монтируем данные для доступа к векторным индексам
+      - ./data:/app/data:ro
+      # Монтируем логи (опционально)
+      - ./logs:/app/logs
+      # Монтируем директорию для SQLite базы данных
+      - ./data/db:/app/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - tavily-adapter
+    networks:
+      - ai-gigaschool-network
+
+  # Telegram Bot сервис
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: tg-module/Dockerfile
+    container_name: ai-gigaschool-bot
+    env_file:
+      - .env
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - LLM_BASE_URL=http://model-api:8000
+      - LLM_API_URL=http://model-api:8000/start_talk/
+      - LLM_PROFESSION_API_URL=http://model-api:8000/get_profession_info/
+      - LLM_ROADMAP_API_URL=http://model-api:8000/get_profession_roadmap/
+      - LLM_CLEAN_API_URL=http://model-api:8000/clean_history/
+    depends_on:
+      - model-api
+    restart: unless-stopped
+    networks:
+      - ai-gigaschool-network
+
+  # SearXNG - поисковая система
+  searxng:
+    container_name: searxng
+    image: docker.io/searxng/searxng:latest
+    pull_policy: missing
+    restart: unless-stopped
+    networks:
+      - ai-gigaschool-network
+    ports:
+      - "8999:8080"
+    volumes:
+      - ./web_search/config.yaml:/etc/searxng/settings.yml:ro
+      - searxng-data:/var/cache/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8999/
+      - BIND_ADDRESS=[::]:8080
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  # Tavily Adapter - адаптер для Tavily API
+  tavily-adapter:
+    build:
+      context: ./web_search/simple_tavily_adapter
+      dockerfile: Dockerfile
+    container_name: tavily-adapter
+    restart: unless-stopped
+    networks:
+      - ai-gigaschool-network
+    ports:
+      - "1000:1000"
+    volumes:
+      - ./web_search/config.yaml:/srv/searxng-docker/config.yaml:ro
+    depends_on:
+      - searxng
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+networks:
+  ai-gigaschool-network:
+    driver: bridge
+
+volumes:
+  logs:
+    driver: local
+  searxng-data:
+    driver: local
+
