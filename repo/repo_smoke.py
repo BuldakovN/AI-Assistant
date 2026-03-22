@@ -1,80 +1,57 @@
+"""
+Локальная проверка репозитория (новая схема: app_user, identity, who_user, conversation, dialog_state).
+
+    cd repo && set PYTHONPATH=.. && python repo_smoke.py
+"""
 import os
-from repository import Repository, RepositoryConfig
+import sys
+from pathlib import Path
+
+# корень проекта в PYTHONPATH
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from repo.repository import Repository, RepositoryConfig  # noqa: E402
+
 
 def main():
-    # чтобы не портить боевую БД — отдельный файл
     db_url = os.getenv("SQLITE_URL", "sqlite:///test_app.sqlite3")
     repo = Repository(RepositoryConfig(db_url=db_url, echo=False))
     repo.create_schema()
 
-    user_id = "574851787"
+    provider, ext = "telegram", "999001"
+    aid = repo.put_session_bundle(
+        provider,
+        ext,
+        user_state="talk",
+        user_type="student",
+        user_metadata={
+            "who_user": "Кратко: студент.",
+            "about_user": "Любит код.",
+            "ai_recommendation": "текст",
+        },
+        conversation_history=[
+            {"role": "system", "text": "sys"},
+            {"role": "user", "text": "привет"},
+        ],
+    )
+    assert aid > 0
 
-    about_payload = {
-        user_id: {
-            "user_metadata": {
-                "user_state": "recommendation",
-                "user_type": "school",
-                "who_user": "Пользователь — школьница Ира, 16 лет.",
-                "about_user": "Любит английский, русский, литературу.",
-                "recommended_test": "RIASEC + Якоря Шейна",
-                "test_user": "Коммуникабельная...",
-                "ai_recommendation_json": {
-                    "professions": {"Переводчик": "Переводит тексты"}
-                },
-                "ai_recommendation": "РЕКОМЕНДОВАННЫЕ ПРОФЕССИИ: ..."
-            }
-        }
-    }
+    b = repo.get_session_bundle(provider, ext)
+    assert b["user_state"] == "talk"
+    assert b["user_type"] == "student"
+    assert b["user_metadata"]["who_user"] == "Кратко: студент."
+    assert b["user_metadata"]["about_user"] == "Любит код."
+    assert len(b["conversation_history"]) == 2
 
-    about_data_payload = [
-        {"role": "system", "text": "текст игр"},
-        {"role": "user", "text": "тонус"},
-        {"role": "assistant", "text": "ок"}
-    ]
+    assert repo.get_app_user_id(provider, ext) == aid
 
-    test_data_payload = [
-        {"role": "system", "text": "текст"},
-        {"role": "user", "text": "/start"},
-        {"role": "assistant", "text": "вопрос 1"}
-    ]
+    repo.clear_identity_session(provider, ext)
+    b2 = repo.get_session_bundle(provider, ext)
+    assert b2["conversation_history"] == []
+    assert b2["user_metadata"] == {}
 
-    who_data_payload = [
-        {"role": "system", "text": "кто ты?"},
-        {"role": "user", "text": "/start"},
-        {"role": "assistant", "text": "привет"}
-    ]
+    print("repo_smoke OK, app_user_id=", aid)
 
-    # --- SAVE ---
-    about_id = repo.save_about(user_id, about_payload)
-    about_data_id = repo.save_about_data(user_id, about_data_payload)
-    test_data_id = repo.save_test_data(user_id, test_data_payload)
-    who_data_id = repo.save_who_data(user_id, who_data_payload)
-
-    print("Saved ids:", about_id, about_data_id, test_data_id, who_data_id)
-
-    # --- GET LATEST ---
-    got_about = repo.get_latest_about(user_id)
-    got_about_data = repo.get_latest_about_data(user_id)
-    got_test_data = repo.get_latest_test_data(user_id)
-    got_who_data = repo.get_latest_who_data(user_id)
-
-    assert got_about == about_payload, "about mismatch"
-    assert got_about_data == about_data_payload, "about_data mismatch"
-    assert got_test_data == test_data_payload, "test_data mismatch"
-    assert got_who_data == who_data_payload, "who_data mismatch"
-
-    print("Read-back assertions passed")
-
-    # --- DELETE ---
-    deleted = repo.delete_all_user_data(user_id)
-    print("Deleted counts:", deleted)
-
-    assert repo.get_latest_about(user_id) is None
-    assert repo.get_latest_about_data(user_id) is None
-    assert repo.get_latest_test_data(user_id) is None
-    assert repo.get_latest_who_data(user_id) is None
-
-    print("Delete assertions passed")
 
 if __name__ == "__main__":
     main()

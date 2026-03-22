@@ -1,69 +1,86 @@
 version: '3.8'
 
 services:
-  # Model API сервис (FastAPI)
-  model-api:
+  crud-service:
     build:
       context: .
-      dockerfile: model/Dockerfile
-    container_name: ai-gigaschool-model
-    ports:
-      - "8000:8000"
-    # Загружаем переменные из model/.env
+      dockerfile: crud-service/Dockerfile
+    container_name: ai-gigaschool-crud
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
-      # Yandex Cloud (переменные загружаются из model/.env, но можно переопределить)
+      # БД на хосте: repo/test_app.sqlite3 (каталог repo примонтирован, файл создастся при первом запуске)
+      - SQLITE_PATH=/app/persist/test_app.sqlite3
+    volumes:
+      - ./repo:/app/persist
+    restart: unless-stopped
+    networks:
+      - ai-gigaschool-network
+
+  llm-service:
+    build:
+      context: .
+      dockerfile: model/Dockerfile.llm
+    container_name: ai-gigaschool-llm
+    env_file:
+      - path: .env
+        required: false
+    environment:
       - LLM_PROVIDER=${LLM_PROVIDER:-yandex}
-      # OpenAI (если используется)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # Anthropic (если используется)
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      # Google (если используется)
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      # Web Search API URL (для подключения к tavily-adapter)
+    restart: unless-stopped
+    networks:
+      - ai-gigaschool-network
+
+  core:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    container_name: ai-gigaschool-core
+    ports:
+      - "8000:8020"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - CRUD_SERVICE_URL=http://crud-service:8010
+      - LLM_SERVICE_URL=http://llm-service:8001
       - WEB_SEARCH_API_URL=http://tavily-adapter:1000
     volumes:
-      # Монтируем данные для доступа к векторным индексам
       - ./data:/app/data:ro
-      # Монтируем логи (опционально)
       - ./logs:/app/logs
-      # Монтируем директорию для SQLite базы данных
-      - ./data/db:/app/db
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     depends_on:
+      - crud-service
+      - llm-service
       - tavily-adapter
     networks:
       - ai-gigaschool-network
 
-  # Telegram Bot сервис
   telegram-bot:
     build:
       context: .
       dockerfile: tg-module/Dockerfile
     container_name: ai-gigaschool-bot
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - LLM_BASE_URL=http://model-api:8000
-      - LLM_API_URL=http://model-api:8000/start_talk/
-      - LLM_PROFESSION_API_URL=http://model-api:8000/get_profession_info/
-      - LLM_ROADMAP_API_URL=http://model-api:8000/get_profession_roadmap/
-      - LLM_CLEAN_API_URL=http://model-api:8000/clean_history/
+      - LLM_BASE_URL=http://core:8020
+      - LLM_API_URL=http://core:8020/start_talk/
+      - LLM_PROFESSION_API_URL=http://core:8020/get_profession_info/
+      - LLM_ROADMAP_API_URL=http://core:8020/get_profession_roadmap/
+      - LLM_CLEAN_API_URL=http://core:8020/clean_history/
     depends_on:
-      - model-api
+      - core
     restart: unless-stopped
     networks:
       - ai-gigaschool-network
 
-  # SearXNG - поисковая система
   searxng:
     container_name: searxng
     image: docker.io/searxng/searxng:latest
@@ -74,7 +91,8 @@ services:
     ports:
       - "8999:8080"
     volumes:
-      - ./web_search/config.yaml:/etc/searxng/settings.yml:ro
+      # Каталог, не один файл — иначе на Docker Desktop (Windows) часто ломается bind mount файла в settings.yml
+      - ./web_search/searxng:/etc/searxng:ro
       - searxng-data:/var/cache/searxng:rw
     environment:
       - SEARXNG_BASE_URL=http://localhost:8999/
@@ -85,7 +103,6 @@ services:
         max-size: "1m"
         max-file: "1"
 
-  # Tavily Adapter - адаптер для Tavily API
   tavily-adapter:
     build:
       context: ./web_search/simple_tavily_adapter
@@ -97,7 +114,7 @@ services:
     ports:
       - "1000:1000"
     volumes:
-      - ./web_search/config.yaml:/srv/searxng-docker/config.yaml:ro
+      - ./web_search/searxng:/srv/searxng-docker:ro
     depends_on:
       - searxng
     healthcheck:
@@ -120,4 +137,3 @@ volumes:
     driver: local
   searxng-data:
     driver: local
-

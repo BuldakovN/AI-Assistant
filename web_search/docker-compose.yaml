@@ -10,7 +10,7 @@ services:
     ports:
       - "0.0.0.0:8999:8080"  # Ваш порт 8999
     volumes:
-      - ./config.yaml:/etc/searxng/settings.yml:ro  # Используем единый конфиг (скопируйте из config.example.yaml)
+      - ./searxng:/etc/searxng:ro
       - searxng-data:/var/cache/searxng:rw
     environment:
       - SEARXNG_BASE_URL=http://localhost:8999/
@@ -30,7 +30,7 @@ services:
     ports:
       - "1000:1000"
     volumes:
-      - ./config.yaml:/srv/searxng-docker/config.yaml:ro  # Используем единый конфиг (скопируйте из config.example.yaml)
+      - ./searxng:/srv/searxng-docker:ro
     depends_on:
       - searxng
     healthcheck:

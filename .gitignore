@@ -1,2 +1,4 @@
 *.env
 #web_search/.env
+*.pyc
+*sqlite3

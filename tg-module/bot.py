@@ -5,7 +5,7 @@ import asyncio
 import logging
 import sys
 import re
-from typing import Dict, Any, Iterable
+from typing import Dict, Any, Iterable, Optional
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, KeyboardButton
@@ -116,6 +116,19 @@ class TelegramBot:
                 self.user_sessions[user_id].pop("testing_process", None)
         await message.answer(response, parse_mode="Markdown", reply_markup=remove_keyboard)
         logger.info(f"Пользователь {user_id} запросил очистку истории")
+
+    @staticmethod
+    def _request_parameters(message: Message, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Параметры для core/CRUD: имя из Telegram и произвольные доп. поля."""
+        p: Dict[str, Any] = {}
+        if message.from_user:
+            name = message.from_user.full_name or message.from_user.first_name or ""
+            name = (name or "").strip()
+            if name:
+                p["user_display_name"] = name
+        if extra:
+            p.update(extra)
+        return p
     
     async def _handle_cancel(self, message: Message):
         """Обработчик команды /cancel"""
@@ -157,7 +170,9 @@ class TelegramBot:
 
         try:
             async with LLMClient() as llm_client:
-                llm_response = await llm_client.generate_response(user_message, user_id)
+                llm_response = await llm_client.generate_response(
+                    user_message, user_id, parameters=self._request_parameters(message)
+                )
 
                 if llm_response.test_info:
                     # Инициализируем процесс тестирования
@@ -266,7 +281,8 @@ class TelegramBot:
 
         # Убираем клавиатуру
         remove_keyboard = ReplyKeyboardRemove()
-        await message.answer("Спасибо за прохождение теста! Подбираю подходящие профессии...", reply_markup=remove_keyboard)
+        await message.answer("Спасибо за прохождение теста!", reply_markup=remove_keyboard)
+        await message.answer("Формирую список рекомендаций, подождите немного…")
 
         # Сбрасываем процесс тестирования
         questions = self.user_sessions[user_id]['testing_process']['test_info']['test_questions']
@@ -275,7 +291,14 @@ class TelegramBot:
             "test_info": None
         }
         async with LLMClient() as llm_client:
-            llm_response = await llm_client.generate_response('', user_id, parameters={"test_results": list(zip(questions, answers))})
+            llm_response = await llm_client.generate_response(
+                "",
+                user_id,
+                parameters=self._request_parameters(
+                    message,
+                    {"test_results": list(zip(questions, answers))},
+                ),
+            )
             await self._send_response_with_professions(message, llm_response)
 
 
