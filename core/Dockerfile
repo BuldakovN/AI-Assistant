@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc \
 COPY core/requirements.txt ./core/requirements.txt
 RUN pip install --no-cache-dir -r core/requirements.txt
 
+COPY common/ ./common/
 COPY core/ ./core/
 COPY model/config.yaml ./model/config.yaml
 COPY model/prof_tests.yaml ./model/prof_tests.yaml

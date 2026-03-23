@@ -11,6 +11,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
+from common.error_logging import setup_service_error_logging
 from config import config
 from llm_client import LLMClient, LLMResponse
 
@@ -20,6 +21,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+setup_service_error_logging("tg-module")
 
 
 class TelegramBot:

@@ -4,8 +4,11 @@ FROM python:3.11-slim
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем код модуля
+# Копируем общий модуль логирования и код бота
+COPY common/ ./common/
 COPY tg-module/ ./tg-module/
+
+RUN mkdir -p /app/logs
 
 # Копируем файл зависимостей
 #COPY tg-module/requirements.txt ./requirements.txt

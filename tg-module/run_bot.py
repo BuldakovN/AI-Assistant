@@ -4,20 +4,26 @@
 """
 import asyncio
 import sys
-import os
 from pathlib import Path
 
-# Добавляем текущую директорию в путь для импорта модулей
-sys.path.insert(0, str(Path(__file__).parent))
+# Корень репозитория — для common.*; tg-module — для bot и локальных импортов
+_tg_dir = Path(__file__).resolve().parent
+_repo_root = _tg_dir.parent
+sys.path.insert(0, str(_repo_root))
+sys.path.insert(0, str(_tg_dir))
+
+import logging
 
 from bot import main
 
 if __name__ == "__main__":
+    log = logging.getLogger(__name__)
     try:
         print("🚀 Запуск Telegram бота...")
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n⏹️ Бот остановлен пользователем")
     except Exception as e:
+        log.exception("Ошибка при запуске бота: %s", e)
         print(f"❌ Ошибка при запуске бота: {e}")
         sys.exit(1)

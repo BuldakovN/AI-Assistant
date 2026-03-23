@@ -31,6 +31,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - LOG_ROOT=/app/logs
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
     networks:
       - ai-gigaschool-network
@@ -49,6 +52,7 @@ services:
       - CRUD_SERVICE_URL=http://crud-service:8010
       - LLM_SERVICE_URL=http://llm-service:8001
       - WEB_SEARCH_API_URL=http://tavily-adapter:1000
+      - LOG_ROOT=/app/logs
     volumes:
       - ./data:/app/data:ro
       - ./logs:/app/logs
@@ -75,6 +79,9 @@ services:
       - LLM_PROFESSION_API_URL=http://core:8020/get_profession_info/
       - LLM_ROADMAP_API_URL=http://core:8020/get_profession_roadmap/
       - LLM_CLEAN_API_URL=http://core:8020/clean_history/
+      - LOG_ROOT=/app/logs
+    volumes:
+      - ./logs:/app/logs
     depends_on:
       - core
     restart: unless-stopped
@@ -133,7 +140,5 @@ networks:
     driver: bridge
 
 volumes:
-  logs:
-    driver: local
   searxng-data:
     driver: local

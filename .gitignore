@@ -2,3 +2,6 @@
 #web_search/.env
 *.pyc
 *sqlite3
+
+# Логи сервисов (docker bind mount ./logs)
+logs/

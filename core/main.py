@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from common.error_logging import setup_service_error_logging
 from core.dialog_model import DialogModel
 from core.graph_workflow import build_turn_graph
 
@@ -21,6 +22,7 @@ if not logging.getLogger().handlers:
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
 logging.getLogger("core").setLevel(_log_level)
+setup_service_error_logging("core")
 
 app = FastAPI(title="Core Service", version="0.1.0")
 Instrumentator().instrument(app).expose(app)

@@ -14,7 +14,10 @@ RUN pip install --no-cache-dir \
     "python-dotenv>=1.0.0"
 RUN pip install --no-cache-dir -r model/requirements.txt
 
+COPY common/ ./common/
 COPY model/ ./model/
+
+RUN mkdir -p /app/logs
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
