@@ -29,6 +29,8 @@ class TurnState(TypedDict, total=False):
     response_msg: Optional[str]
     professions: Optional[Dict[str, str]]
     test_info: Optional[Dict[str, Any]]
+    user_state: Optional[str]
+    test_version: Optional[str]
     error: Optional[str]
 
 
@@ -43,13 +45,23 @@ def _build_llm_view(model: DialogModel, user_id: str, raw_response: Any) -> Dict
         professions = ai_recommendation_json["professions"]
     elif user_state == UserState.TEST and recommended_test and model.test_variant == "v2":
         test_info = user_metadata.get("recommended_test")
+    test_version: Optional[str] = None
+    if user_state == UserState.TEST:
+        tv = (model.test_variant or "").strip()
+        test_version = tv if tv else None
     if raw_response is None:
         msg = ""
     elif isinstance(raw_response, str):
         msg = raw_response
     else:
         msg = str(raw_response)
-    return {"msg": msg, "professions": professions, "test_info": test_info}
+    return {
+        "msg": msg,
+        "professions": professions,
+        "test_info": test_info,
+        "user_state": user_state,
+        "test_version": test_version,
+    }
 
 
 def _route_after_guard(state: TurnState) -> Literal["inject_persist", "dialog"]:
@@ -86,6 +98,7 @@ def build_turn_graph(model: DialogModel):
                 "response_msg": INJECTION_USER_MESSAGE,
                 "professions": None,
                 "test_info": None,
+                "test_version": None,
             }
         return {**state, "injection_blocked": False}
 
@@ -103,6 +116,8 @@ def build_turn_graph(model: DialogModel):
                 "response_msg": view["msg"],
                 "professions": view["professions"],
                 "test_info": view["test_info"],
+                "user_state": view["user_state"],
+                "test_version": view.get("test_version"),
             }
         except Exception as e:
             return {
@@ -111,6 +126,8 @@ def build_turn_graph(model: DialogModel):
                 "response_msg": f"Ошибка: {e}",
                 "professions": None,
                 "test_info": None,
+                "user_state": None,
+                "test_version": None,
             }
 
     async def node_persist(state: TurnState) -> TurnState:

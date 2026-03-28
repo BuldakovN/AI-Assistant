@@ -1,9 +1,9 @@
 ## Векторный поиск профессий
 
-Эта директория содержит инструменты для построения и использования FAISS-индекса профессий на основе эмбеддингов Яндекс (YandexGPT Embeddings). Индекс строится по агрегированному файлу `data/summary_hh_professions_comparison.json` и сохраняется локально для быстрого семантического поиска.
+Эта директория содержит инструменты для построения и использования FAISS-индекса профессий на основе эмбеддингов (провайдер задаётся `RAG_EMBEDDING_PROVIDER` / `LLM_PROVIDER`). Индекс строится по агрегированному JSON (по умолчанию `data/profession/summary_hh_professions_comparison.json`, переопределение: `FAISS_PROFESSION_SOURCE_JSON`).
 
 ### Состав
-- `build_faiss_index.py` — сборка FAISS-индекса по данным `summary_hh_professions_comparison.json`.
+- `build_faiss_index.py` — сборка FAISS-индекса по данным из `FAISS_PROFESSION_SOURCE_JSON` или `data/profession/summary_hh_professions_comparison.json`.
 - `search_professions.py` — пример поиска по готовому индексу (kNN, топ-K результатов).
 - `yandex_embeddings.py` — обёртка над YandexGPT Embeddings (получение эмбеддингов для текстов).
 - `docs.json` — карта документов (метаданные), сохраняется после сборки индекса.
@@ -30,7 +30,7 @@ pip install -r requirements.txt
 ### Источник данных
 Индекс строится по файлу:
 ```
-data/summary_hh_professions_comparison.json
+data/profession/summary_hh_professions_comparison.json
 ```
 Каждая запись агрегирует информацию о профессии. Текст берётся как конкатенация полей или ключ, если текст пустой.
 
@@ -43,11 +43,11 @@ python -m professions_vector_index.build_faiss_index
 - загрузит `.env`
 - подготовит тексты и метаданные
 - сделает эмбеддинги батчами (по 5, с задержкой ~1.2 c для соблюдения лимитов API)
-- создаст FAISS-индекс и сохранит его в директорию `data/profession_vector` (`index.faiss`, `index.pkl`, `docs.json`)
+- создаст FAISS-индекс в `data/profession/profession_vector/<провайдер>/` (`index.faiss`, `index.pkl`, `docs.json`), где `<провайдер>` — slug из `RAG_EMBEDDING_PROVIDER` или `LLM_PROVIDER` (см. `store_paths.py`; полный путь можно задать через `FAISS_PROFESSION_INDEX_DIR`)
 
 Ожидаемый вывод в конце:
 ```
-Индекс сохранён в: data/profession_vector
+Индекс сохранён в: data/profession/profession_vector/<провайдер>
 ```
 
 ### Поиск по индексу
@@ -58,7 +58,7 @@ python -m professions_vector_index.search_professions --query "Data Scientist" -
 Либо импортируйте модуль в своём коде и используйте методы FAISS/VectorStore из LangChain.
 
 ### Обновление индекса
-Если данные изменились (обновился `summary_hh_professions_comparison.json`), перезапустите сборку:
+Если данные изменились (обновился исходный JSON профессий), перезапустите сборку:
 ```
 python -m professions_vector_index.build_faiss_index
 ```

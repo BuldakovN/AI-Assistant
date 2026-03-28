@@ -13,11 +13,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from repo.repository import Repository, RepositoryConfig
+from repo.repository import DEFAULT_SQLITE_FILENAME, Repository, RepositoryConfig
 
 app = FastAPI(title="AI-Assistant CRUD", version="0.2.0")
 
-_db_path = os.getenv("SQLITE_PATH", "app/db/app.sqlite3")
+_db_path = os.getenv("SQLITE_PATH", f"app/db/{DEFAULT_SQLITE_FILENAME}")
 Path(_db_path).parent.mkdir(parents=True, exist_ok=True)
 _db_url = f"sqlite:///{_db_path}"
 repo = Repository(RepositoryConfig(db_url=_db_url, echo=False))

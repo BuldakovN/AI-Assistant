@@ -1,14 +1,13 @@
-import os
 from typing import Optional
 
-from langchain_community.embeddings.yandex import YandexGPTEmbeddings
+from langchain_core.embeddings import Embeddings
+
+from professions_vector_index.rag_embeddings import get_rag_embeddings
 
 
-def get_yandex_embeddings(api_key: Optional[str] = None, folder_id: Optional[str] = None) -> YandexGPTEmbeddings:
-    key = api_key or os.getenv("YANDEX_CLOUD_API_KEY")
-    folder = folder_id or os.getenv("YANDEX_CLOUD_FOLDER")
-    if not key or not folder:
-        raise ValueError("Не заданы YANDEX_CLOUD_API_KEY и/или YANDEX_CLOUD_FOLDER. Укажите их в окружении.")
-    return YandexGPTEmbeddings(api_key=key, folder_id=folder)
-
-
+def get_yandex_embeddings(api_key: Optional[str] = None, folder_id: Optional[str] = None) -> Embeddings:
+    """
+    Обёртка для обратной совместимости: ``get_rag_embeddings`` с учётом
+    ``RAG_EMBEDDING_PROVIDER`` / ``LLM_PROVIDER`` (не только Yandex).
+    """
+    return get_rag_embeddings(api_key=api_key, folder_id=folder_id)

@@ -13,6 +13,7 @@ COPY core/ ./core/
 COPY model/config.yaml ./model/config.yaml
 COPY model/prof_tests.yaml ./model/prof_tests.yaml
 COPY professions_vector_index/ ./professions_vector_index/
+COPY education/ ./education/
 COPY data/ ./data/
 
 ENV PYTHONUNBUFFERED=1

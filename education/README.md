@@ -82,5 +82,5 @@ python -m education.build_education_json
 ```bash
 python -m education.build_education_faiss_index
 ```
-Результат: индекс и метаданные сохраняются в `data/education/education_vector/`
+Результат: индекс и метаданные сохраняются в `data/education/education_vector/<провайдер>/` (slug из `RAG_EMBEDDING_PROVIDER` или `LLM_PROVIDER`, см. `professions_vector_index.store_paths`).
 

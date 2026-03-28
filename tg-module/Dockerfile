@@ -1,6 +1,10 @@
 # Используем официальный Python образ
 FROM python:3.11-slim
 
+# CA для исходящего HTTPS (api.telegram.org и др.)
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Устанавливаем рабочую директорию
 WORKDIR /app
 

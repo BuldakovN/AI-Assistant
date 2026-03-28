@@ -5,11 +5,8 @@ from typing import List
 from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
 
-from professions_vector_index.yandex_embeddings import get_yandex_embeddings
-
-
-INDEX_DIR = os.path.join("data", "profession_vector")
-COURSES_DIR = os.path.join("data/education", "education_vector")
+from professions_vector_index.rag_embeddings import get_rag_embeddings
+from professions_vector_index.store_paths import courses_index_dir, profession_index_dir
 
 INTERNAL_CONTEXT = (
     """
@@ -24,8 +21,10 @@ INTERNAL_CONTEXT = (
 
 def search_top_k(query: str, k: int = 5) -> List[str]:
     load_dotenv()
-    embeddings = get_yandex_embeddings()
-    vs = FAISS.load_local(INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
+    embeddings = get_rag_embeddings()
+    vs = FAISS.load_local(
+        profession_index_dir(), embeddings, allow_dangerous_deserialization=True
+    )
     docs = vs.similarity_search_with_score(query, k=k, threshold=0.75)
     results = []
     for d, score in docs:
@@ -34,11 +33,11 @@ def search_top_k(query: str, k: int = 5) -> List[str]:
     return results
 
 def rag_search(query: str, k: int = 5, api_key: str = None, folder_id: str = None, index_dir='INDEX_DIR') -> List[str]:
-    directory = INDEX_DIR
-    if index_dir == 'COURSES_DIR':
-        directory = COURSES_DIR
+    directory = (
+        courses_index_dir() if index_dir == "COURSES_DIR" else profession_index_dir()
+    )
     load_dotenv()
-    embeddings = get_yandex_embeddings(api_key=api_key, folder_id=folder_id)
+    embeddings = get_rag_embeddings(api_key=api_key, folder_id=folder_id)
     vs = FAISS.load_local(directory, embeddings, allow_dangerous_deserialization=True)
     docs = vs.similarity_search_with_score(query, k=k, threshold=0.75)
     return docs

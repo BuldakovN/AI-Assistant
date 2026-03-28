@@ -122,7 +122,7 @@ class LangchainAdapter(LLMAdapter):
         Инициализирует Langchain адаптер
         
         Args:
-            provider: Название провайдера ("openai", "anthropic", "google", "yandex", etc.)
+            provider: Название провайдера ("openai", "anthropic", "google", "mistral", "yandex", etc.)
             model_name: Название модели (если None, используется дефолтная для провайдера)
             **kwargs: Дополнительные параметры для инициализации (api_key, temperature, etc.)
         """
@@ -162,6 +162,17 @@ class LangchainAdapter(LLMAdapter):
                 google_api_key=api_key,
                 temperature=self.kwargs.get('temperature', 0.5)
             )
+        elif self.provider == "mistral":
+            from langchain_mistralai import ChatMistralAI
+            api_key = self.kwargs.get('api_key') or os.getenv('MISTRAL_API_KEY')
+            if not api_key:
+                raise ValueError("MISTRAL_API_KEY должен быть установлен в переменных окружения")
+            model = self.model_name or self.kwargs.get('model', 'mistral-small-latest')
+            self._chat_model = ChatMistralAI(
+                model=model,
+                mistral_api_key=api_key,
+                temperature=self.kwargs.get('temperature', 0.5)
+            )
         elif self.provider == "yandex":
             from langchain_community.chat_models import ChatYandexGPT
             api_key = self.kwargs.get('api_key') or os.getenv('YANDEX_CLOUD_API_KEY')
@@ -173,7 +184,7 @@ class LangchainAdapter(LLMAdapter):
             )
         else:
             raise ValueError(f"Неподдерживаемый провайдер: {self.provider}. "
-                           f"Поддерживаются: openai, anthropic, google, yandex")
+                           f"Поддерживаются: openai, anthropic, google, mistral, yandex")
     
     def _convert_messages(self, messages: List[Dict[str, str]]):
         """Конвертирует сообщения из формата приложения в формат Langchain"""
@@ -215,7 +226,7 @@ class LangchainAdapter(LLMAdapter):
         """
         from langchain_core.messages import HumanMessage
         from langchain_core.tools import tool
-        from langchain_core.pydantic_v1 import BaseModel, Field
+        from pydantic import Field, create_model
         
         # Конвертируем Yandex tools в Langchain tools
         langchain_tools = []
@@ -251,14 +262,21 @@ class LangchainAdapter(LLMAdapter):
                     else:
                         fields[param_name] = (Optional[field_type], Field(default=None, description=param_desc))
                 
-                # Создаем динамический класс для параметров
-                ParamsModel = type('ParamsModel', (BaseModel,), fields)
+                # Создаем динамический класс для параметров (Pydantic v2)
+                ParamsModel = create_model(f"{func_name.title()}Params", **fields)
                 
                 # Создаем tool
-                @tool(args_schema=ParamsModel, name=func_name, description=func_desc)
+                @tool(args_schema=ParamsModel)
                 def dynamic_tool(**kwargs):
+                    """Dynamic tool wrapper."""
                     return kwargs
-                
+
+                # Для совместимости с версиями langchain_core,
+                # где tool() не принимает name/description.
+                dynamic_tool.name = func_name or dynamic_tool.name
+                if func_desc:
+                    dynamic_tool.description = func_desc
+
                 langchain_tools.append(dynamic_tool)
         
         # Биндим tools к модели
@@ -286,7 +304,7 @@ def create_llm_adapter(provider: str = "yandex", **kwargs) -> LLMAdapter:
     Фабрика для создания LLM адаптера
     
     Args:
-        provider: Провайдер LLM ("yandex", "openai", "anthropic", "google")
+        provider: Провайдер LLM ("yandex", "openai", "anthropic", "google", "mistral")
         **kwargs: Дополнительные параметры для инициализации адаптера
         
     Returns:
@@ -299,7 +317,7 @@ def create_llm_adapter(provider: str = "yandex", **kwargs) -> LLMAdapter:
             folder_id=kwargs.get('folder_id'),
             api_key=kwargs.get('api_key')
         )
-    elif provider in ["openai", "anthropic", "google"]:
+    elif provider in ["openai", "anthropic", "google", "mistral"]:
         return LangchainAdapter(
             provider=provider,
             model_name=kwargs.get('model_name'),
@@ -307,5 +325,5 @@ def create_llm_adapter(provider: str = "yandex", **kwargs) -> LLMAdapter:
         )
     else:
         raise ValueError(f"Неподдерживаемый провайдер: {provider}. "
-                       f"Поддерживаются: yandex, openai, anthropic, google")
+                       f"Поддерживаются: yandex, openai, anthropic, google, mistral")
 

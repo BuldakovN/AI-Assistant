@@ -14,7 +14,9 @@ sys.path.insert(0, str(_tg_dir))
 
 import logging
 
-from bot import main
+from aiogram.exceptions import TelegramNetworkError
+
+from bot2 import main
 
 if __name__ == "__main__":
     log = logging.getLogger(__name__)
@@ -23,6 +25,15 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n⏹️ Бот остановлен пользователем")
+    except TelegramNetworkError as e:
+        log.exception("Сеть Telegram недоступна: %s", e)
+        print(
+            "❌ Не удаётся подключиться к api.telegram.org (HTTPS).\n"
+            "   Проверьте интернет из контейнера/хоста, файрвол, VPN и блокировки.\n"
+            "   Из контейнера: curl -vI https://api.telegram.org\n"
+            f"   Детали: {e}"
+        )
+        sys.exit(1)
     except Exception as e:
         log.exception("Ошибка при запуске бота: %s", e)
         print(f"❌ Ошибка при запуске бота: {e}")

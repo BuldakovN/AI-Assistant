@@ -14,7 +14,6 @@ from prometheus_client import Counter, Gauge, Histogram
 import threading
 import time
 from datetime import datetime, timedelta
-from repo.repository import Repository, RepositoryConfig
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
@@ -65,6 +64,25 @@ config = load_yaml(config_path)
 prof_tests = load_yaml(prof_tests_path)
 
 
+def _canonical_prof_test_key(raw: Optional[str]) -> str:
+    if not isinstance(raw, str):
+        return ""
+    name = raw.strip()
+    keys = (prof_tests.get("test_questions") or {}).keys()
+    if name in keys:
+        return name
+    aliases = {
+        "Якоря карьеры Шейна": "Тест Якоря карьеры Шейна",
+        "Тест Холланда (RIASEC)": "Тест Холланда/RIASEC",
+        "MBTI": "Тест MBTI",
+        "PCM": "Тест PCM",
+    }
+    mapped = aliases.get(name)
+    if mapped and mapped in keys:
+        return mapped
+    return name
+
+
 class UserState:
     WHO = 'who'
     ABOUT = 'about'
@@ -87,7 +105,7 @@ class Model:
         Инициализирует модель с указанным LLM провайдером
 
         Args:
-            llm_provider: Провайдер LLM ("yandex", "openai", "anthropic", "google")
+            llm_provider: Провайдер LLM ("yandex", "openai", "anthropic", "google", "mistral")
                          Если None, используется значение из переменной окружения LLM_PROVIDER
             **llm_kwargs: Дополнительные параметры для инициализации LLM адаптера
         """
@@ -110,17 +128,7 @@ class Model:
         self.user_state: Dict[str, str] = {}
         self.user_type: Dict[str, Optional[str]] = {}
         self.user_metadata: Dict[str, Dict] = {}
-        self.test_variant = os.getenv('test_run_version', '')
-
-        # репозиторий + создание схемы
-        # Используем директорию /app/db для базы данных (монтируется как volume)
-        db_path = os.getenv("SQLITE_PATH", "app/db/app.sqlite3")
-        db_url = f'sqlite:///{db_path}'
-        # Создаем директорию, если её нет
-        db_dir = Path(db_path).parent
-        db_dir.mkdir(parents=True, exist_ok=True)
-        self.repo = Repository(RepositoryConfig(db_url=db_url, echo=False))
-        self.repo.create_schema()
+        self.test_variant = (os.getenv('test_run_version') or 'v2').strip()
 
         self.user_last_seen = {}
         self.active_users_gauge = Gauge('bot_active_users_24h', 'Активные пользователи за последние 24 часа')
@@ -153,19 +161,13 @@ class Model:
         self.user_metadata.pop(user_id, None)
         USERS_TOTAL.set(len(self.conversation_history))
 
-        # удаляем все из БД по пользователю
-        self.repo.clean_metadata(user_id)
-        self.repo.clean_conversation_history(user_id)
-
     async def init_user_session(self, user_id: str):
-        """Инициализирует сессию для нового пользователя"""
+        """Инициализирует сессию пользователя только в памяти процесса."""
         if user_id not in self.conversation_history:
-            user_data = self.repo.get_metadata(user_id)
-            conversation_history = self.repo.get_conversation_history(user_id)
-            self.conversation_history[user_id] = conversation_history
-            self.user_state[user_id] = user_data.get('user_state', UserState.WHO)
-            self.user_type[user_id] = user_data.get('user_type', None)
-            self.user_metadata[user_id] = user_data.get('user_metadata', {})
+            self.conversation_history[user_id] = []
+            self.user_state[user_id] = UserState.WHO
+            self.user_type[user_id] = None
+            self.user_metadata[user_id] = {}
             USERS_TOTAL.set(len(self.conversation_history))
 
     def get_user_info(self, user_id: str):
@@ -534,8 +536,14 @@ class Model:
         about_user = "\n".join(self.user_metadata[user_id].values())
         select_test_message = config['prof_test_description_for_tool']
         select_test_message = select_test_message.replace('<about_user>', about_user)
-        test_for_user = await self.toll_run(message=select_test_message, tool_name='select_test_tool')
-        test_for_user = test_for_user['user_test']
+        tool_out = await self.toll_run(message=select_test_message, tool_name='select_test_tool')
+        raw_name = tool_out['user_test'] if isinstance(tool_out, dict) else ''
+        test_for_user = _canonical_prof_test_key(raw_name)
+        if test_for_user not in (prof_tests.get('test_questions') or {}):
+            return (
+                'Не удалось сопоставить выбранный тест с каталогом методик. '
+                'Попробуйте отправить сообщение ещё раз или начните с /start.'
+            )
         self.user_metadata[user_id]['test_for_user'] = test_for_user
 
         test_description = prof_tests['test_description'][test_for_user]

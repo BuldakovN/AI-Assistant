@@ -41,6 +41,27 @@ def load_yaml(path: Path) -> dict:
 config = load_yaml(config_path)
 prof_tests = load_yaml(prof_tests_path)
 
+
+def _canonical_prof_test_key(raw: Optional[str]) -> str:
+    """Имя теста от LLM → ключ в prof_tests.yaml (синонимы из старых промптов/enum)."""
+    if not isinstance(raw, str):
+        return ""
+    name = raw.strip()
+    keys = (prof_tests.get("test_questions") or {}).keys()
+    if name in keys:
+        return name
+    aliases = {
+        "Якоря карьеры Шейна": "Тест Якоря карьеры Шейна",
+        "Тест Холланда (RIASEC)": "Тест Холланда/RIASEC",
+        "MBTI": "Тест MBTI",
+        "PCM": "Тест PCM",
+    }
+    mapped = aliases.get(name)
+    if mapped and mapped in keys:
+        return mapped
+    return name
+
+
 EDUCATION_JSON = Path(
     os.getenv("EDUCATION_JSON_PATH", str(_repo_root / "data" / "education" / "education_detailed.json"))
 )
@@ -73,7 +94,8 @@ class DialogModel:
         self.user_state: Dict[str, str] = {}
         self.user_type: Dict[str, Optional[str]] = {}
         self.user_metadata: Dict[str, Dict[str, Any]] = {}
-        self.test_variant = os.getenv("test_run_version", "")
+        # Пустое значение → v2 (кнопки, test_session, /finish_test_early); v1 только явно: test_run_version=v1
+        self.test_variant = (os.getenv("test_run_version") or "v2").strip()
         self.user_last_seen: Dict[str, datetime] = {}
         self._web_search = None
 
@@ -235,6 +257,12 @@ class DialogModel:
             if name:
                 self.user_metadata[user_id]["user_display_name"] = name
 
+        if parameters.get("finish_test_early"):
+            if self.user_state[user_id] != UserState.TEST:
+                return "Сейчас тест не активен."
+            if self.test_variant != "v2":
+                return "Досрочное завершение поддерживается только для пошагового теста (v2)."
+
         if self.user_state[user_id] == UserState.WHO:
             if not self.conversation_history.get(user_id):
                 system_prompt = config["who_are_you_prompt"]
@@ -267,49 +295,31 @@ class DialogModel:
         if self.user_state[user_id] == UserState.TEST:
             if self.test_variant == "v2":
                 if not self.user_metadata[user_id].get("test_for_user"):
-                    _ = await self.recommend_test_v2(user_id)
-                    return _
+                    return await self.recommend_test_v2(user_id)
 
-                test_for_user = self.user_metadata[user_id]["test_for_user"]
-                test_description = config["prof_tests_description"][test_for_user]
-                tr = parameters.get("test_results") or []
-                if len(tr) > 2:
-                    user_answers = await self.convert_to_qa_format(tr)
-                    system_prompt = (
-                        f"Перед тобой результаты тестирования пользователя. Был проведен {test_for_user}\n\n"
-                        f"ОПИСАНИЕ ТЕСТА:\n{test_description}\n\nПроанализируй ответы пользователя."
-                        f"Сделай суммаризацию информации, выдели ключевые аспекты"
+                out = await self._handle_test_v2_turn(user_id, user_input, parameters)
+                if out is not None:
+                    return out
+                # Переход TEST → RECOMMENDATION выполнен внутри _handle_test_v2_turn
+            else:
+                if not self.conversation_history.get(user_id):
+                    await self.recommend_test(user_id)
+                    system_prompt = config["test_run_prompt"]
+                    user_metadata = (
+                        f"{self.user_metadata[user_id]['who_user']}\n{self.user_metadata[user_id]['about_user']}"
                     )
-                    user_input = (
-                        f"ПРАВИЛА ПРОХОЖДЕНИЯ ТЕСТА:\n{prof_tests['test_description'][test_for_user]}\n\n"
-                        f"ТЕСТИРОВАНИЕ ПОЛЬЗОВАТЕЛЯ:\n{user_answers}"
-                    )
+                    test = self.user_metadata[user_id]["recommended_test"]
+                    system_prompt = system_prompt.replace("<user_metadata>", user_metadata)
+                    system_prompt = system_prompt.replace("<test>", test)
                     await self.add_system_message(system_prompt, user_id)
-                    ai_response = await self.chat_loop(user_id, user_input)
-                    self.user_metadata[user_id]["test_user"] = ai_response
+                    user_input = "/start"
 
-                self.user_state[user_id] = UserState.RECOMMENDATION
+                ai_response = await self.chat_loop(user_id, user_input)
+                new_state = await self.update_user_state(ai_response, user_id)
+                if not new_state:
+                    return ai_response
                 self.conversation_history[user_id] = []
                 return
-
-            if not self.conversation_history.get(user_id):
-                await self.recommend_test(user_id)
-                system_prompt = config["test_run_prompt"]
-                user_metadata = (
-                    f"{self.user_metadata[user_id]['who_user']}\n{self.user_metadata[user_id]['about_user']}"
-                )
-                test = self.user_metadata[user_id]["recommended_test"]
-                system_prompt = system_prompt.replace("<user_metadata>", user_metadata)
-                system_prompt = system_prompt.replace("<test>", test)
-                await self.add_system_message(system_prompt, user_id)
-                user_input = "/start"
-
-            ai_response = await self.chat_loop(user_id, user_input)
-            new_state = await self.update_user_state(ai_response, user_id)
-            if not new_state:
-                return ai_response
-            self.conversation_history[user_id] = []
-            return
 
         if self.user_state[user_id] == UserState.RECOMMENDATION:
             system_prompt = config["recommend_profession_prompt"]
@@ -458,12 +468,129 @@ class DialogModel:
         self.user_metadata[user_id]["recommended_test"] = ai_response
         self.conversation_history[user_id] = []
 
+    def _prof_test_description(self, test_for_user: str) -> str:
+        desc_map = config.get("prof_tests_description") or {}
+        if isinstance(desc_map, dict) and test_for_user in desc_map:
+            return str(desc_map[test_for_user])
+        return str((prof_tests.get("test_description") or {}).get(test_for_user, ""))
+
+    async def _finalize_test_v2_to_recommendation(self, user_id: str, collected: List) -> None:
+        """Суммаризация ответов, сброс test_session, переход в recommendation (один запуск start_talk)."""
+        meta = self.user_metadata[user_id]
+        test_for_user = meta.get("test_for_user")
+        if not test_for_user:
+            meta.pop("test_session", None)
+            self.user_state[user_id] = UserState.RECOMMENDATION
+            self.conversation_history[user_id] = []
+            return
+
+        test_description = self._prof_test_description(test_for_user)
+        rules = str((prof_tests.get("test_description") or {}).get(test_for_user, ""))
+
+        if len(collected) > 2:
+            user_answers = await self.convert_to_qa_format(collected)
+            system_prompt = (
+                f"Перед тобой результаты тестирования пользователя. Был проведен {test_for_user}\n\n"
+                f"ОПИСАНИЕ ТЕСТА:\n{test_description}\n\nПроанализируй ответы пользователя."
+                f"Сделай суммаризацию информации, выдели ключевые аспекты"
+            )
+            user_prompt = f"ПРАВИЛА ПРОХОЖДЕНИЯ ТЕСТА:\n{rules}\n\nТЕСТИРОВАНИЕ ПОЛЬЗОВАТЕЛЯ:\n{user_answers}"
+            await self.add_system_message(system_prompt, user_id)
+            ai_response = await self.chat_loop(user_id, user_prompt)
+            meta["test_user"] = ai_response
+        elif len(collected) > 0:
+            meta["test_user"] = await self.convert_to_qa_format(collected)
+        else:
+            meta["test_user"] = "Тест завершён досрочно: ответы на вопросы не были получены."
+
+        meta.pop("test_session", None)
+        self.user_state[user_id] = UserState.RECOMMENDATION
+        self.conversation_history[user_id] = []
+
+    async def _handle_test_v2_turn(self, user_id: str, user_input: str, parameters: Dict[str, Any]) -> Optional[str]:
+        """
+        Вся логика пошагового теста v2 в модели (состояние в user_metadata.test_session).
+        Возвращает текст пользователю или None, если выполнен переход в RECOMMENDATION.
+        """
+        meta = self.user_metadata[user_id]
+        rt = meta.get("recommended_test") or {}
+        questions: List[str] = list(rt.get("test_questions") or [])
+        bottoms: List[str] = list(rt.get("test_bottoms") or [])
+
+        tr_legacy = parameters.get("test_results")
+        if tr_legacy:
+            pairs = [list(x) for x in tr_legacy]
+            meta["test_session"] = {"current_index": len(questions), "answers": pairs}
+            await self._finalize_test_v2_to_recommendation(user_id, pairs)
+            return None
+
+        if parameters.get("finish_test_early"):
+            ts = meta.get("test_session") or {"current_index": 0, "answers": []}
+            collected = list(ts.get("answers") or [])
+            await self._finalize_test_v2_to_recommendation(user_id, collected)
+            return None
+
+        ts = meta.get("test_session")
+        if ts is None:
+            ts = {"current_index": 0, "answers": []}
+            meta["test_session"] = ts
+
+        idx = int(ts.get("current_index") or 0)
+        answers: List = list(ts.get("answers") or [])
+        ts["answers"] = answers
+
+        prompt = (user_input or "").strip()
+        finish_markers = ("🚫 Завершить тест", "/finish_test")
+        if prompt in finish_markers:
+            await self._finalize_test_v2_to_recommendation(user_id, answers)
+            return None
+
+        if not questions:
+            return "Не удалось загрузить вопросы теста. Попробуйте позже."
+
+        if idx >= len(questions):
+            await self._finalize_test_v2_to_recommendation(user_id, answers)
+            return None
+
+        if idx == 0 and len(answers) == 0 and not prompt:
+            td = rt.get("test_description") or self._prof_test_description(meta["test_for_user"])
+            return (
+                "Спасибо за ответы! Сейчас я проведу небольшой тест, чтобы на его основе подобрать профессии\n\n"
+                f"{td}\n\n{questions[0]}"
+            )
+
+        if not prompt:
+            return questions[idx]
+
+        if prompt not in bottoms:
+            return (
+                "Пожалуйста, выберите один из предложенных вариантов ответа.\n\n"
+                f"{questions[idx]}"
+            )
+
+        answers.append([questions[idx], prompt])
+        idx += 1
+        ts["current_index"] = idx
+        ts["answers"] = answers
+
+        if idx >= len(questions):
+            await self._finalize_test_v2_to_recommendation(user_id, answers)
+            return None
+
+        return questions[idx]
+
     async def recommend_test_v2(self, user_id: str) -> str:
         about_user = "\n".join(str(v) for v in self.user_metadata[user_id].values())
         select_test_message = config["prof_test_description_for_tool"]
         select_test_message = select_test_message.replace("<about_user>", about_user)
-        test_for_user = await self.toll_run(message=select_test_message, tool_name="select_test_tool")
-        test_for_user = test_for_user["user_test"]
+        tool_out = await self.toll_run(message=select_test_message, tool_name="select_test_tool")
+        raw_name = tool_out["user_test"] if isinstance(tool_out, dict) else ""
+        test_for_user = _canonical_prof_test_key(raw_name)
+        if test_for_user not in (prof_tests.get("test_questions") or {}):
+            return (
+                "Не удалось сопоставить выбранный тест с каталогом методик. "
+                "Попробуйте отправить сообщение ещё раз или начните с /start."
+            )
         self.user_metadata[user_id]["test_for_user"] = test_for_user
 
         test_description = prof_tests["test_description"][test_for_user]
@@ -474,7 +601,15 @@ class DialogModel:
             "test_questions": test_questions,
             "test_bottoms": test_bottoms,
         }
-        return "empty"
+        self.user_metadata[user_id]["test_session"] = {"current_index": 0, "answers": []}
+        td = self._prof_test_description(test_for_user)
+        if not test_questions:
+            return "Не удалось подобрать вопросы для теста. Попробуйте позже."
+        q0 = test_questions[0]
+        return (
+            "Спасибо за ответы! Сейчас я проведу небольшой тест, чтобы на его основе подобрать профессии\n\n"
+            f"{td}\n\n{q0}"
+        )
 
     @staticmethod
     async def convert_to_qa_format(data_list: List) -> str:

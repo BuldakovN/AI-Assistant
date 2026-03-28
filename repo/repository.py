@@ -11,6 +11,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
 JsonLike = Union[Dict[str, Any], List[Any]]
+DEFAULT_SQLITE_FILENAME = "db_app.sqlite3"
 
 
 class Base(DeclarativeBase):
@@ -117,7 +118,7 @@ class UserMetadata(Base):
 
 @dataclass(frozen=True)
 class RepositoryConfig:
-    db_url: str = "sqlite:///app.sqlite3"
+    db_url: str = f"sqlite:///{DEFAULT_SQLITE_FILENAME}"
     echo: bool = False
 
 

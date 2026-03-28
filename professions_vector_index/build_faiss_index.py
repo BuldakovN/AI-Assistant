@@ -6,13 +6,16 @@ from typing import Dict, List, Tuple
 from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
 
-from professions_vector_index.yandex_embeddings import get_yandex_embeddings
+from professions_vector_index.rag_embeddings import get_rag_embeddings
+from professions_vector_index.store_paths import profession_index_dir
 
 
-# Используем агрегированный файл для построения векторной базы
-DATA_PATH = os.path.join("data", "summary_hh_professions_comparison.json")
-INDEX_DIR = os.path.join("data", "profession_vector")
-DOCS_JSON = os.path.join(INDEX_DIR, "docs.json")
+def profession_source_json_path() -> str:
+    """JSON с агрегированными профессиями для индексации. Переопределение: FAISS_PROFESSION_SOURCE_JSON."""
+    override = (os.getenv("FAISS_PROFESSION_SOURCE_JSON") or "").strip()
+    if override:
+        return override
+    return os.path.join("data", "profession", "summary_hh_professions_comparison.json")
 
 
 def load_professions(path: str) -> Dict[str, str]:
@@ -37,9 +40,12 @@ def profession_to_text(key: str, combined_str: str) -> Tuple[str, Dict]:
 
 def build_index() -> None:
     load_dotenv()
-    os.makedirs(INDEX_DIR, exist_ok=True)
+    index_dir = profession_index_dir()
+    docs_json = os.path.join(index_dir, "docs.json")
+    os.makedirs(index_dir, exist_ok=True)
 
-    data = load_professions(DATA_PATH)
+    data_path = profession_source_json_path()
+    data = load_professions(data_path)
 
     texts: List[str] = []
     metadatas: List[Dict] = []
@@ -56,10 +62,10 @@ def build_index() -> None:
     print(f"Найдено {len(texts)} профессий для индексации")
     print("Создание эмбеддингов с задержками для соблюдения лимитов API...")
     
-    embeddings = get_yandex_embeddings()
+    embeddings = get_rag_embeddings()
     
     # Создаём индекс по частям, чтобы не превысить лимит запросов
-    BATCH_SIZE = 5  # по 5 текстов за раз
+    BATCH_SIZE = 20  # по 5 текстов за раз
     all_embeddings = []
     
     for i in range(0, len(texts), BATCH_SIZE):
@@ -81,12 +87,12 @@ def build_index() -> None:
     ]
     vs = FAISS.from_embeddings(text_embeddings=pairs, embedding=embeddings, metadatas=metadatas)
 
-    vs.save_local(INDEX_DIR)
+    vs.save_local(index_dir)
     # сохраним отдельный JSON с картой документов
-    with open(DOCS_JSON, "w", encoding="utf-8") as f:
+    with open(docs_json, "w", encoding="utf-8") as f:
         json.dump({i: m for i, m in enumerate(metadatas)}, f, ensure_ascii=False, indent=2)
 
-    print(f"Индекс сохранён в: {INDEX_DIR}. Всего документов: {len(texts)}")
+    print(f"Индекс сохранён в: {index_dir}. Всего документов: {len(texts)}")
 
 
 if __name__ == "__main__":

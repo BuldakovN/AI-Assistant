@@ -10,11 +10,11 @@ from pathlib import Path
 # корень проекта в PYTHONPATH
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from repo.repository import Repository, RepositoryConfig  # noqa: E402
+from repo.repository import DEFAULT_SQLITE_FILENAME, Repository, RepositoryConfig  # noqa: E402
 
 
 def main():
-    db_url = os.getenv("SQLITE_URL", "sqlite:///test_app.sqlite3")
+    db_url = os.getenv("SQLITE_URL", f"sqlite:///{DEFAULT_SQLITE_FILENAME}")
     repo = Repository(RepositoryConfig(db_url=db_url, echo=False))
     repo.create_schema()
 
