@@ -6,7 +6,8 @@ import yaml
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from professions_vector_index.search_professions import rag_search
+
+from common.rag_client import rag_search
 from web_search_travily import WebSearch
 import aiohttp
 from llm_adapter import create_llm_adapter, LLMAdapter
@@ -418,7 +419,7 @@ class Model:
         # Подготовка описания профессии
         profession_full = self.user_metadata[user_id]["ai_recommendation_json"]["professions"][profession_name]
         profession_full = f"{profession_name}\n{profession_full}"
-        prof_info = rag_search(query=profession_full, k=2, api_key=api_key, folder_id=folder_id)
+        prof_info = await rag_search(query=profession_full, k=2, api_key=api_key, folder_id=folder_id)
         about_profession = ''
         for doc in prof_info:
             about_profession += f"{doc[0].page_content}\n\n"
@@ -464,8 +465,8 @@ class Model:
     async def go_rag_roadmap(self, profession_name, user_id=0):
         # Подготовка описания курсов
         profession_desc = PROF_CONTEXT_DICT[profession_name]['description']
-        courses = rag_search(query=profession_desc, k=15, api_key=api_key, folder_id=folder_id,
-                             index_dir="COURSES_DIR")
+        courses = await rag_search(query=profession_desc, k=15, api_key=api_key, folder_id=folder_id,
+                                   index_dir="COURSES_DIR")
         about_courses = ''
         with open('data/education/education_detailed.json', encoding='utf-8') as f:
             links_data = f.read()

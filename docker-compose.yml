@@ -18,6 +18,41 @@ services:
     networks:
       - ai-gigaschool-network
 
+  vector-store:
+    build:
+      context: .
+      dockerfile: vector_store/Dockerfile
+    container_name: ai-gigaschool-vector-store
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-yandex}
+      - YANDEX_CLOUD_FOLDER=${YANDEX_CLOUD_FOLDER:-}
+      - YANDEX_CLOUD_API_KEY=${YANDEX_CLOUD_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-}
+      - RAG_YANDEX_EMBEDDING_QUERY_MODEL=${RAG_YANDEX_EMBEDDING_QUERY_MODEL:-}
+      - RAG_YANDEX_EMBEDDING_DOC_MODEL=${RAG_YANDEX_EMBEDDING_DOC_MODEL:-}
+      - RAG_YANDEX_EMBEDDING_MODEL_VERSION=${RAG_YANDEX_EMBEDDING_MODEL_VERSION:-}
+      - RAG_OPENAI_EMBEDDING_MODEL=${RAG_OPENAI_EMBEDDING_MODEL:-}
+      - RAG_GOOGLE_EMBEDDING_MODEL=${RAG_GOOGLE_EMBEDDING_MODEL:-}
+      - RAG_MISTRAL_EMBEDDING_MODEL=${RAG_MISTRAL_EMBEDDING_MODEL:-}
+      - FAISS_PROFESSION_VECTOR_ROOT=${FAISS_PROFESSION_VECTOR_ROOT:-}
+      - FAISS_COURSES_VECTOR_ROOT=${FAISS_COURSES_VECTOR_ROOT:-}
+      - FAISS_PROFESSION_INDEX_DIR=${FAISS_PROFESSION_INDEX_DIR:-}
+      - FAISS_COURSES_INDEX_DIR=${FAISS_COURSES_INDEX_DIR:-}
+      - FAISS_PROFESSION_SOURCE_JSON=${FAISS_PROFESSION_SOURCE_JSON:-}
+      - FAISS_EDUCATION_SOURCE_JSON=${FAISS_EDUCATION_SOURCE_JSON:-}
+      - VECTOR_STORE_LOG_LEVEL=${VECTOR_STORE_LOG_LEVEL:-INFO}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - ai-gigaschool-network
+
   llm-service:
     build:
       context: .
@@ -34,10 +69,13 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - VECTOR_STORE_SERVICE_URL=http://vector-store:8030
       - LOG_ROOT=/app/logs
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
+    depends_on:
+      - vector-store
     networks:
       - ai-gigaschool-network
 
@@ -51,7 +89,7 @@ services:
     env_file:
       - path: .env
         required: false
-    # Переменные LLM/RAG/FAISS для core — в env.example; пересборка FAISS: POST /v1/admin/rebuild-faiss-indexes + CORE_REBUILD_FAISS_SECRET
+    # RAG/FAISS — в сервисе vector-store; пересборка через Core (прокси) или напрямую vector-store:8030
     environment:
       - CRUD_SERVICE_URL=http://crud-service:8010
       - LLM_SERVICE_URL=http://llm-service:8001
@@ -63,24 +101,11 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - test_run_version=${TEST_RUN_VERSION:-v1}
-      - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-}
-      - RAG_YANDEX_EMBEDDING_QUERY_MODEL=${RAG_YANDEX_EMBEDDING_QUERY_MODEL:-}
-      - RAG_YANDEX_EMBEDDING_DOC_MODEL=${RAG_YANDEX_EMBEDDING_DOC_MODEL:-}
-      - RAG_YANDEX_EMBEDDING_MODEL_VERSION=${RAG_YANDEX_EMBEDDING_MODEL_VERSION:-}
-      - RAG_OPENAI_EMBEDDING_MODEL=${RAG_OPENAI_EMBEDDING_MODEL:-}
-      - RAG_GOOGLE_EMBEDDING_MODEL=${RAG_GOOGLE_EMBEDDING_MODEL:-}
-      - RAG_MISTRAL_EMBEDDING_MODEL=${RAG_MISTRAL_EMBEDDING_MODEL:-}
-      - FAISS_PROFESSION_VECTOR_ROOT=${FAISS_PROFESSION_VECTOR_ROOT:-}
-      - FAISS_COURSES_VECTOR_ROOT=${FAISS_COURSES_VECTOR_ROOT:-}
-      - FAISS_PROFESSION_INDEX_DIR=${FAISS_PROFESSION_INDEX_DIR:-}
-      - FAISS_COURSES_INDEX_DIR=${FAISS_COURSES_INDEX_DIR:-}
-      - FAISS_PROFESSION_SOURCE_JSON=${FAISS_PROFESSION_SOURCE_JSON:-}
-      - FAISS_EDUCATION_SOURCE_JSON=${FAISS_EDUCATION_SOURCE_JSON:-}
+      - VECTOR_STORE_SERVICE_URL=http://vector-store:8030
       - CORE_REBUILD_FAISS_SECRET=${CORE_REBUILD_FAISS_SECRET:-}
       - CORE_LOG_LEVEL=${CORE_LOG_LEVEL:-INFO}
       - LOG_ROOT=/app/logs
     volumes:
-      # для POST /v1/admin/rebuild-faiss-indexes смонтируйте ./data с правом записи (уберите :ro)
       - ./data:/app/data
       - ./logs:/app/logs
     restart: unless-stopped
@@ -88,6 +113,7 @@ services:
       - crud-service
       - llm-service
       - tavily-adapter
+      - vector-store
     networks:
       - ai-gigaschool-network
 

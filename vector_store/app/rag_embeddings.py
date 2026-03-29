@@ -171,5 +171,5 @@ def get_rag_embeddings(
     api_key: Optional[str] = None,
     folder_id: Optional[str] = None,
 ) -> Embeddings:
-    """Совместимость с вызовами из ``dialog_model`` / ``rag_search`` (ключи Yandex)."""
+    """Совместимость с вызовами из поиска / сборки индекса (ключи Yandex)."""
     return create_rag_embeddings(api_key=api_key, folder_id=folder_id)

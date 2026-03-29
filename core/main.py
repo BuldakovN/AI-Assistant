@@ -1,12 +1,12 @@
 """
 Core API: оркестрация для Telegram и других клиентов.
 """
-import asyncio
 import logging
 import os
 from datetime import datetime
 
-from fastapi import FastAPI, Header, HTTPException
+import httpx
+from fastapi import FastAPI, Header
 from pydantic import BaseModel
 from typing import Any, Dict, Optional
 
@@ -105,55 +105,40 @@ class RebuildCoursesFAISSResponse(BaseModel):
     courses: RebuildFAISSPartResult
 
 
-def _run_build_profession_faiss() -> None:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    from professions_vector_index.build_faiss_index import build_index
-
-    build_index()
-
-
-def _run_build_courses_faiss() -> None:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    from education.build_education_faiss_index import build_index as build_education_index
-
-    build_education_index()
+def _vector_store_url() -> str:
+    return (os.getenv("VECTOR_STORE_SERVICE_URL") or "http://localhost:8030").rstrip("/")
 
 
 @app.post("/v1/admin/rebuild-courses-faiss-indexes", response_model=RebuildCoursesFAISSResponse)
 async def rebuild_courses_faiss_indexes(authorization: Optional[str] = Header(None)) -> RebuildCoursesFAISSResponse:
     """
-    Пересборка FAISS только для курсов через текущий эмбеддер (RAG_* и ключи провайдера в окружении).
-
-    Работает совместно с ``education/build_education_faiss_index.py`` и использует каталоги,
-    зависящие от выбранного провайдера эмбеддингов (см. ``professions_vector_index/store_paths.py``).
+    Прокси к микросервису vector_store: пересборка FAISS только для курсов
+    (эмбеддер и каталоги — в окружении vector_store, см. ``vector_store/app/store_paths.py``).
     """
-
-    course_ok, course_err = True, None
+    base = _vector_store_url()
     try:
-        await asyncio.to_thread(_run_build_courses_faiss)
-        logging.getLogger("core").info("rebuild courses FAISS succeeded (courses only)")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+            r = await client.post(f"{base}/v1/admin/rebuild-courses-faiss-indexes")
+            r.raise_for_status()
+            data = r.json()
+        courses = data.get("courses") or {}
+        return RebuildCoursesFAISSResponse(
+            courses=RebuildFAISSPartResult(ok=bool(courses.get("ok", True)), error=courses.get("error"))
+        )
     except Exception as e:
-        logging.getLogger("core").exception("rebuild courses FAISS failed (courses only)")
-        course_ok, course_err = False, str(e)
-
-    return RebuildCoursesFAISSResponse(courses=RebuildFAISSPartResult(ok=course_ok, error=course_err))
+        logging.getLogger("core").exception("rebuild courses FAISS proxy failed")
+        return RebuildCoursesFAISSResponse(courses=RebuildFAISSPartResult(ok=False, error=str(e)))
 
 
 @app.post("/v1/admin/rebuild-faiss-indexes", response_model=RebuildFAISSResponse)
 async def rebuild_faiss_indexes(authorization: Optional[str] = Header(None)) -> RebuildFAISSResponse:
     """
-    Пересборка FAISS для профессий и курсов через текущий эмбеддер (RAG_* и ключи провайдера в окружении).
+    Прокси к микросервису vector_store: пересборка FAISS для профессий и курсов.
 
     Каталоги по умолчанию: ``data/profession/profession_vector/<slug>/`` и
-    ``data/education/education_vector/<slug>/``, где ``<slug>`` — провайдер из ``RAG_EMBEDDING_PROVIDER``
-    или ``LLM_PROVIDER`` (см. ``professions_vector_index.store_paths``).
+    ``data/education/education_vector/<slug>/`` на стороне vector_store.
 
-    Включение: задайте CORE_REBUILD_FAISS_SECRET. Запрос: заголовок ``Authorization: Bearer <secret>``.
-    Каталог ``data`` должен быть доступен на запись (в Docker не используйте :ro для тома с индексами).
+    Включение (опционально): ``CORE_REBUILD_FAISS_SECRET`` и заголовок ``Authorization: Bearer <secret>``.
     """
 
     # secret = (os.getenv("CORE_REBUILD_FAISS_SECRET") or "").strip()
@@ -165,26 +150,22 @@ async def rebuild_faiss_indexes(authorization: Optional[str] = Header(None)) -> 
     # if (authorization or "").strip() != f"Bearer {secret}":
     #     raise HTTPException(status_code=401, detail="Unauthorized")
 
-    prof_ok, prof_err = True, None
+    base = _vector_store_url()
     try:
-        await asyncio.to_thread(_run_build_profession_faiss)
-        logging.getLogger("core").info("rebuild professions FAISS succeeded")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+            r = await client.post(f"{base}/v1/admin/rebuild-faiss-indexes")
+            r.raise_for_status()
+            data = r.json()
+        prof = data.get("professions") or {}
+        courses = data.get("courses") or {}
+        return RebuildFAISSResponse(
+            professions=RebuildFAISSPartResult(ok=bool(prof.get("ok", True)), error=prof.get("error")),
+            courses=RebuildFAISSPartResult(ok=bool(courses.get("ok", True)), error=courses.get("error")),
+        )
     except Exception as e:
-        logging.getLogger("core").exception("rebuild professions FAISS failed")
-        prof_ok, prof_err = False, str(e)
-
-    course_ok, course_err = True, None
-    try:
-        await asyncio.to_thread(_run_build_courses_faiss)
-        logging.getLogger("core").info("rebuild courses FAISS succeeded")
-    except Exception as e:
-        logging.getLogger("core").exception("rebuild courses FAISS failed")
-        course_ok, course_err = False, str(e)
-    
-    return RebuildFAISSResponse(
-        professions=RebuildFAISSPartResult(ok=prof_ok, error=prof_err),
-        courses=RebuildFAISSPartResult(ok=course_ok, error=course_err),
-    )
+        logging.getLogger("core").exception("rebuild FAISS proxy failed")
+        err = RebuildFAISSPartResult(ok=False, error=str(e))
+        return RebuildFAISSResponse(professions=err, courses=err)
 
 
 @app.get("/")

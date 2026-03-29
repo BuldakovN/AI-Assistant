@@ -27,7 +27,6 @@ def rag_provider_slug() -> str:
     explicit = (os.getenv("RAG_EMBEDDING_PROVIDER") or "").strip().lower()
     raw = explicit if explicit else (os.getenv("LLM_PROVIDER") or "yandex").strip().lower()
     raw = raw or "yandex"
-    # только безопасные для ФС символы
     slug = re.sub(r"[^a-z0-9._-]+", "_", raw).strip("._-") or "yandex"
     return slug
 

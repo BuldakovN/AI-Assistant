@@ -2,7 +2,7 @@ from typing import Optional
 
 from langchain_core.embeddings import Embeddings
 
-from professions_vector_index.rag_embeddings import get_rag_embeddings
+from app.rag_embeddings import get_rag_embeddings
 
 
 def get_yandex_embeddings(api_key: Optional[str] = None, folder_id: Optional[str] = None) -> Embeddings:
