@@ -6,6 +6,7 @@
 
 - **Yandex Cloud** (по умолчанию) - через Yandex Cloud ML SDK
 - **OpenAI** - через Langchain
+- **OpenRouter** - через Langchain (`ChatOpenAI` + OpenRouter API base URL)
 - **Anthropic (Claude)** - через Langchain
 - **Google (Gemini)** - через Langchain
 
@@ -19,6 +20,14 @@
 # Для OpenAI
 export LLM_PROVIDER=openai
 export OPENAI_API_KEY=your_api_key
+
+# Для OpenRouter
+export LLM_PROVIDER=openrouter
+export OPENROUTER_API_KEY=your_api_key
+# Опционально:
+# export OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+# export OPENROUTER_HTTP_REFERER=https://your-app-url.example
+# export OPENROUTER_X_TITLE=AI-Gigaschool
 
 # Для Anthropic
 export LLM_PROVIDER=anthropic
@@ -48,6 +57,13 @@ model = Model(
     model_name="gpt-4o-mini"  # опционально
 )
 
+# Использование OpenRouter
+model = Model(
+    llm_provider="openrouter",
+    api_key="your_openrouter_api_key",
+    model_name="openai/gpt-4o-mini"  # опционально
+)
+
 # Использование Anthropic
 model = Model(
     llm_provider="anthropic",
@@ -74,7 +90,7 @@ model = Model(
 
 2. **YandexAdapter** - реализация для Yandex Cloud ML SDK
 
-3. **LangchainAdapter** - реализация для Langchain провайдеров (OpenAI, Anthropic, Google)
+3. **LangchainAdapter** - реализация для Langchain провайдеров (OpenAI, OpenRouter, Anthropic, Google, Mistral)
 
 4. **create_llm_adapter()** - фабрика для создания нужного адаптера
 

@@ -7,8 +7,7 @@ services:
       dockerfile: crud-service/Dockerfile
     container_name: ai-gigaschool-crud
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       # БД на хосте: repo/db_app.sqlite3 (каталог repo примонтирован, файл создастся при первом запуске)
       - SQLITE_PATH=/app/persist/db_app.sqlite3
@@ -24,8 +23,7 @@ services:
       dockerfile: vector_store/Dockerfile
     container_name: ai-gigaschool-vector-store
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       - LLM_PROVIDER=${LLM_PROVIDER:-yandex}
       - YANDEX_CLOUD_FOLDER=${YANDEX_CLOUD_FOLDER:-}
@@ -59,8 +57,7 @@ services:
       dockerfile: model/Dockerfile.llm
     container_name: ai-gigaschool-llm
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       - LLM_PROVIDER=${LLM_PROVIDER:-yandex}
       - YANDEX_CLOUD_FOLDER=${YANDEX_CLOUD_FOLDER:-}
@@ -87,8 +84,7 @@ services:
     ports:
       - "8000:8020"
     env_file:
-      - path: .env
-        required: false
+      - .env
     # RAG/FAISS — в сервисе vector-store; пересборка через Core (прокси) или напрямую vector-store:8030
     environment:
       - CRUD_SERVICE_URL=http://crud-service:8010
@@ -123,8 +119,7 @@ services:
       dockerfile: tg-module/Dockerfile
     container_name: ai-gigaschool-bot
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - LLM_BASE_URL=http://core:8020
@@ -146,7 +141,7 @@ services:
   searxng:
     container_name: searxng
     image: docker.io/searxng/searxng:latest
-    pull_policy: missing
+    pull_policy: if_not_present
     restart: unless-stopped
     networks:
       - ai-gigaschool-network

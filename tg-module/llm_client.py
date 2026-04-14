@@ -131,13 +131,26 @@ class LLMClient:
 
         normalized = msg.strip()
         lowered = normalized.lower()
+        # Блокируем только явные технические сообщения сервиса.
+        # Нельзя фильтровать по словам "ошибка"/"error" в общем виде:
+        # модель может использовать их в нормальном пользовательском ответе.
         error_markers = (
-            "ошибка",
-            "error",
             "traceback",
-            "exception",
+            "exception:",
             "module not found",
             "internal server error",
+            "bad gateway",
+            "gateway timeout",
+            "service unavailable",
+            "connection refused",
+            "timed out",
+            "read timed out",
+            "status code: 5",
+            "http 5",
+            "500 ",
+            "502 ",
+            "503 ",
+            "504 ",
         )
         if any(marker in lowered for marker in error_markers):
             import logging

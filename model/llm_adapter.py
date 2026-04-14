@@ -122,7 +122,7 @@ class LangchainAdapter(LLMAdapter):
         Инициализирует Langchain адаптер
         
         Args:
-            provider: Название провайдера ("openai", "anthropic", "google", "mistral", "yandex", etc.)
+            provider: Название провайдера ("openai", "openrouter", "anthropic", "google", "mistral", "yandex", etc.)
             model_name: Название модели (если None, используется дефолтная для провайдера)
             **kwargs: Дополнительные параметры для инициализации (api_key, temperature, etc.)
         """
@@ -143,6 +143,30 @@ class LangchainAdapter(LLMAdapter):
                 model=model,
                 api_key=api_key,
                 temperature=self.kwargs.get('temperature', 0.5)
+            )
+        elif self.provider == "openrouter":
+            from langchain_openai import ChatOpenAI
+            api_key = self.kwargs.get('api_key') or os.getenv('OPENROUTER_API_KEY')
+            if not api_key:
+                raise ValueError("OPENROUTER_API_KEY должен быть установлен в переменных окружения")
+
+            model = self.model_name or self.kwargs.get('model', 'openai/gpt-4o-mini')
+            base_url = self.kwargs.get('base_url') or os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
+            http_referer = self.kwargs.get('http_referer') or os.getenv('OPENROUTER_HTTP_REFERER')
+            x_title = self.kwargs.get('x_title') or os.getenv('OPENROUTER_X_TITLE')
+
+            extra_headers = {}
+            if http_referer:
+                extra_headers["HTTP-Referer"] = http_referer
+            if x_title:
+                extra_headers["X-Title"] = x_title
+
+            self._chat_model = ChatOpenAI(
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                temperature=self.kwargs.get('temperature', 0.5),
+                default_headers=extra_headers or None,
             )
         elif self.provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
@@ -184,7 +208,7 @@ class LangchainAdapter(LLMAdapter):
             )
         else:
             raise ValueError(f"Неподдерживаемый провайдер: {self.provider}. "
-                           f"Поддерживаются: openai, anthropic, google, mistral, yandex")
+                           f"Поддерживаются: openai, openrouter, anthropic, google, mistral, yandex")
     
     def _convert_messages(self, messages: List[Dict[str, str]]):
         """Конвертирует сообщения из формата приложения в формат Langchain"""
@@ -304,7 +328,7 @@ def create_llm_adapter(provider: str = "yandex", **kwargs) -> LLMAdapter:
     Фабрика для создания LLM адаптера
     
     Args:
-        provider: Провайдер LLM ("yandex", "openai", "anthropic", "google", "mistral")
+        provider: Провайдер LLM ("yandex", "openai", "openrouter", "anthropic", "google", "mistral")
         **kwargs: Дополнительные параметры для инициализации адаптера
         
     Returns:
@@ -317,7 +341,7 @@ def create_llm_adapter(provider: str = "yandex", **kwargs) -> LLMAdapter:
             folder_id=kwargs.get('folder_id'),
             api_key=kwargs.get('api_key')
         )
-    elif provider in ["openai", "anthropic", "google", "mistral"]:
+    elif provider in ["openai", "openrouter", "anthropic", "google", "mistral"]:
         return LangchainAdapter(
             provider=provider,
             model_name=kwargs.get('model_name'),
@@ -325,5 +349,5 @@ def create_llm_adapter(provider: str = "yandex", **kwargs) -> LLMAdapter:
         )
     else:
         raise ValueError(f"Неподдерживаемый провайдер: {provider}. "
-                       f"Поддерживаются: yandex, openai, anthropic, google, mistral")
+                       f"Поддерживаются: yandex, openai, openrouter, anthropic, google, mistral")
 
