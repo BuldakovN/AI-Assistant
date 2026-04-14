@@ -148,8 +148,8 @@ services:
     ports:
       - "8999:8080"
     volumes:
-      # Каталог, не один файл — иначе на Docker Desktop (Windows) часто ломается bind mount файла в settings.yml
-      - ./web_search/searxng:/etc/searxng:ro
+      # Каталог должен быть writable: при первом старте SearXNG создаёт /etc/searxng/settings.yml из шаблона.
+      - ./web_search/searxng:/etc/searxng:rw
       - searxng-data:/var/cache/searxng:rw
     environment:
       - SEARXNG_BASE_URL=http://localhost:8999/
