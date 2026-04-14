@@ -15,6 +15,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from common.error_logging import setup_service_error_logging
 from model.llm_adapter import create_llm_adapter
+from model.tool_call_retry import invoke_tool_call_with_retries
 
 load_dotenv()
 
@@ -95,20 +96,17 @@ def tool_call(req: ToolCallRequest):
         raise HTTPException(status_code=400, detail=f"Unknown tool_key: {req.tool_key}")
     tools = config[req.tool_key]
     try:
-        raw = _adapter.tool_call(
+        result, tokens = invoke_tool_call_with_retries(
+            _adapter,
             message=req.message,
             tools=tools,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
+            log=logger,
         )
-    except Exception as e:
-        logger.exception("Ошибка /v1/tool_call: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    if isinstance(raw, tuple):
-        result, tokens = raw[0], raw[1] if len(raw) > 1 else 0
-    else:
-        result, tokens = raw, 0
+    except RuntimeError as e:
+        logger.exception("Ошибка /v1/tool_call после ретраев: %s", e)
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
     if isinstance(result, str):
         try:

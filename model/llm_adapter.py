@@ -60,17 +60,23 @@ class LLMAdapter(ABC):
 class YandexAdapter(LLMAdapter):
     """Адаптер для работы с Yandex Cloud ML SDK"""
     
-    def __init__(self, folder_id: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        folder_id: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ):
         from yandex_cloud_ml_sdk import YCloudML
         
         self.folder_id = folder_id or os.getenv('YANDEX_CLOUD_FOLDER', '')
         self.api_key = api_key or os.getenv('YANDEX_CLOUD_API_KEY', '')
+        self.model_name = model_name or os.getenv('YANDEX_CLOUD_MODEL', 'yandexgpt-5-lite')
         
         if not self.folder_id or not self.api_key:
             raise ValueError("YANDEX_CLOUD_FOLDER и YANDEX_CLOUD_API_KEY должны быть установлены в переменных окружения")
         
         sdk = YCloudML(folder_id=self.folder_id, auth=self.api_key)
-        model_uri = f"gpt://{self.folder_id}/yandexgpt"
+        model_uri = f"gpt://{self.folder_id}/{self.model_name}"
         self.model = sdk.models.completions(model_uri)
         self.model = self.model.configure(temperature=0.5)
     
@@ -93,7 +99,7 @@ class YandexAdapter(LLMAdapter):
             "x-folder-id": self.folder_id
         }
         payload = {
-            "modelUri": f"gpt://{self.folder_id}/yandexgpt",
+            "modelUri": f"gpt://{self.folder_id}/{self.model_name}",
             "completionOptions": {
                 "temperature": temperature,
                 "maxTokens": max_tokens
@@ -339,7 +345,8 @@ def create_llm_adapter(provider: str = "yandex", **kwargs) -> LLMAdapter:
     if provider == "yandex":
         return YandexAdapter(
             folder_id=kwargs.get('folder_id'),
-            api_key=kwargs.get('api_key')
+            api_key=kwargs.get('api_key'),
+            model_name=kwargs.get('model_name'),
         )
     elif provider in ["openai", "openrouter", "anthropic", "google", "mistral"]:
         return LangchainAdapter(

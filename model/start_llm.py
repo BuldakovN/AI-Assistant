@@ -11,6 +11,7 @@ from common.rag_client import rag_search
 from web_search_travily import WebSearch
 import aiohttp
 from llm_adapter import create_llm_adapter, LLMAdapter
+from tool_call_retry import invoke_tool_call_with_retries
 from prometheus_client import Counter, Gauge, Histogram
 import threading
 import time
@@ -253,11 +254,12 @@ class Model:
     async def toll_run(self, message: str, tool_name: str):
         """Выполняет tool call через LLM адаптер"""
         tools = config[tool_name]
-        result, llm_tokens = self.llm_adapter.tool_call(
+        result, llm_tokens = invoke_tool_call_with_retries(
+            self.llm_adapter,
             message=message,
             tools=tools,
             temperature=0.6,
-            max_tokens=2000
+            max_tokens=2000,
         )
         LLM_TOKENS_RECEIVED.inc(llm_tokens)
         LLM_REQUESTS.inc()

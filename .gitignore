@@ -7,4 +7,4 @@
 # Логи сервисов (docker bind mount ./logs)
 logs/
 docs/
-
+.cursor/
