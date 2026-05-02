@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from common.error_logging import setup_service_error_logging
+from common.professions_normalize import normalize_professions
 from core.dialog_model import DialogModel
 from core.graph_workflow import build_turn_graph
 
@@ -40,9 +41,7 @@ def _coerce_turn_out_to_llm_fields(out: dict) -> dict:
     elif not isinstance(msg, str):
         msg = str(msg)
 
-    prof = out.get("professions")
-    if prof is not None and not isinstance(prof, dict):
-        prof = None
+    prof = normalize_professions(out.get("professions"))
 
     ti = out.get("test_info")
     if ti is not None and not isinstance(ti, dict):
@@ -216,7 +215,9 @@ async def profession_info(request: ProfessionRequest) -> LLMResponse:
     response = await _dialog.go_rag(profession_name=request.profession_name, user_id=request.user_id)
     user_metadata = _dialog.user_metadata.get(request.user_id, {})
     ai_recommendation_json = user_metadata.get("ai_recommendation_json")
-    professions = ai_recommendation_json["professions"] if ai_recommendation_json else None
+    professions = (
+        normalize_professions(ai_recommendation_json.get("professions")) if ai_recommendation_json else None
+    )
     await _dialog.persist(request.user_id)
     us = _dialog.user_state.get(request.user_id)
     tv = None
@@ -236,7 +237,9 @@ async def profession_roadmap(request: ProfessionRequest) -> LLMResponse:
     response = await _dialog.go_rag_roadmap(profession_name=request.profession_name, user_id=request.user_id)
     user_metadata = _dialog.user_metadata.get(request.user_id, {})
     ai_recommendation_json = user_metadata.get("ai_recommendation_json")
-    professions = ai_recommendation_json["professions"] if ai_recommendation_json else None
+    professions = (
+        normalize_professions(ai_recommendation_json.get("professions")) if ai_recommendation_json else None
+    )
     await _dialog.persist(request.user_id)
     us = _dialog.user_state.get(request.user_id)
     tv = None

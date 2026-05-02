@@ -9,6 +9,7 @@ from typing import Any, Dict, Literal, Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from common.professions_normalize import normalize_professions
 from core.dialog_model import DialogModel, UserState
 from core.injection_guard import detect_prompt_injection
 
@@ -41,8 +42,10 @@ def _build_llm_view(model: DialogModel, user_id: str, raw_response: Any) -> Dict
     recommended_test = user_metadata.get("recommended_test")
     professions = None
     test_info = None
-    if user_state == UserState.TALK and ai_recommendation_json and ai_recommendation_json.get("professions"):
-        professions = ai_recommendation_json["professions"]
+    if user_state == UserState.TALK and ai_recommendation_json:
+        professions = normalize_professions(ai_recommendation_json.get("professions"))
+        if not professions:
+            professions = None
     elif user_state == UserState.TEST and recommended_test and model.test_variant == "v2":
         test_info = user_metadata.get("recommended_test")
     test_version: Optional[str] = None

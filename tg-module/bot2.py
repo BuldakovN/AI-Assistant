@@ -296,8 +296,9 @@ class TelegramBot:
     async def _handle_start(self, message: Message) -> None:
         user_id = message.from_user.id
         self.user_sessions[user_id] = UserSession(active=True, message_count=0, dialog_state="who")
-        await self.bot.send_chat_action(user_id, "typing")
-        await self._send_text(message, config.start_text)
+        # Приверственное системное сообщение
+        #await self.bot.send_chat_action(user_id, "typing")
+        #await self._send_text(message, config.start_text)
         async with LLMClient() as llm:
             resp = await llm.generate_response("/start", user_id, parameters=self._request_parameters(message))
         await self._dispatch_llm_response(message, resp)

@@ -15,6 +15,7 @@ import httpx
 import yaml
 from dotenv import load_dotenv
 
+from common.professions_normalize import normalize_ai_recommendation_json
 from common.rag_client import rag_search
 
 load_dotenv()
@@ -116,6 +117,9 @@ class DialogModel:
         self.user_state[user_id] = data.get("user_state") or UserState.WHO
         self.user_type[user_id] = data.get("user_type")
         self.user_metadata[user_id] = dict(data.get("user_metadata") or {})
+        blob = self.user_metadata[user_id].get("ai_recommendation_json")
+        if blob is not None:
+            self.user_metadata[user_id]["ai_recommendation_json"] = normalize_ai_recommendation_json(blob)
 
     async def persist(self, user_id: str) -> None:
         payload = {
@@ -345,8 +349,8 @@ class DialogModel:
             u_in = f"\n\nИнформация о пользователе:\n{u_in}"
             ai_response = await self.chat_loop(user_id, u_in)
             self.user_metadata[user_id]["ai_recommendation"] = ai_response
-            self.user_metadata[user_id]["ai_recommendation_json"] = await self.toll_run(
-                ai_response, tool_name="make_json_tool"
+            self.user_metadata[user_id]["ai_recommendation_json"] = normalize_ai_recommendation_json(
+                await self.toll_run(ai_response, tool_name="make_json_tool")
             )
             self.user_state[user_id] = UserState.TALK
             self.conversation_history[user_id] = []
@@ -376,8 +380,8 @@ class DialogModel:
             new_recommendation = await self.toll_run(ai_response, tool_name="is_recommendation_tool")
             if new_recommendation and new_recommendation.get("new_recommendation"):
                 self.user_metadata[user_id]["ai_recommendation"] = ai_response
-                self.user_metadata[user_id]["ai_recommendation_json"] = await self.toll_run(
-                    ai_response, tool_name="make_json_tool"
+                self.user_metadata[user_id]["ai_recommendation_json"] = normalize_ai_recommendation_json(
+                    await self.toll_run(ai_response, tool_name="make_json_tool")
                 )
             return ai_response
 
