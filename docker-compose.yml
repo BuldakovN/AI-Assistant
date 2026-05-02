@@ -15,15 +15,13 @@ services:
       - ./repo:/app/persist
     restart: unless-stopped
     networks:
-      - ai-gigaschool-network
+      - ai-internal-network
 
   vector-store:
     build:
       context: .
       dockerfile: vector_store/Dockerfile
     container_name: ai-gigaschool-vector-store
-    ports:
-      - "8030:8030"
     env_file:
       - .env
     environment:
@@ -56,7 +54,8 @@ services:
       - ./data:/app/data
     restart: unless-stopped
     networks:
-      - ai-gigaschool-network
+      - ai-internal-network
+      - ai-outer-network
 
   # UI http://localhost:6006, OTLP HTTP на 6006 (/v1/traces), OTLP gRPC на 4317
   phoenix:
@@ -72,7 +71,8 @@ services:
       - phoenix_data:/mnt/data
     restart: unless-stopped
     networks:
-      - ai-gigaschool-network
+      - ai-internal-network
+      - ai-outer-network
 
   llm-service:
     build:
@@ -108,15 +108,14 @@ services:
       - vector-store
       - phoenix
     networks:
-      - ai-gigaschool-network
+      - ai-internal-network
+      - ai-outer-network
 
   core:
     build:
       context: .
       dockerfile: core/Dockerfile
     container_name: ai-gigaschool-core
-    ports:
-      - "8000:8020"
     env_file:
       - .env
     # RAG/FAISS — в сервисе vector-store; пересборка через Core (прокси) или напрямую vector-store:8030
@@ -145,7 +144,7 @@ services:
       - tavily-adapter
       - vector-store
     networks:
-      - ai-gigaschool-network
+      - ai-internal-network
 
   telegram-bot:
     build:
@@ -170,7 +169,8 @@ services:
       - core
     restart: unless-stopped
     networks:
-      - ai-gigaschool-network
+      - ai-internal-network
+      - ai-outer-network
 
   searxng:
     container_name: searxng
@@ -178,15 +178,15 @@ services:
     pull_policy: if_not_present
     restart: unless-stopped
     networks:
-      - ai-gigaschool-network
-    ports:
-      - "8999:8080"
+      - ai-internal-network
+      - ai-outer-network
     volumes:
       # Каталог должен быть writable: при первом старте SearXNG создаёт /etc/searxng/settings.yml из шаблона.
       - ./web_search/searxng:/etc/searxng:rw
       - searxng-data:/var/cache/searxng:rw
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8999/
+      # UI SearxNG недоступен с хоста по умолчанию; при необходимости отладки добавьте ports и при необходимости — ai-outer-network уже есть.
+      - SEARXNG_BASE_URL=http://searxng:8080/
       - BIND_ADDRESS=[::]:8080
     logging:
       driver: "json-file"
@@ -201,9 +201,8 @@ services:
     container_name: tavily-adapter
     restart: unless-stopped
     networks:
-      - ai-gigaschool-network
-    ports:
-      - "1000:1000"
+      - ai-internal-network
+      - ai-outer-network
     volumes:
       - ./web_search/searxng:/srv/searxng-docker:ro
     depends_on:
@@ -236,10 +235,13 @@ services:
       - core
       - llm-service
     networks:
-      - ai-gigaschool-network
+      - ai-internal-network
 
 networks:
-  ai-gigaschool-network:
+  ai-internal-network:
+    driver: bridge
+    internal: true
+  ai-outer-network:
     driver: bridge
 
 volumes:
