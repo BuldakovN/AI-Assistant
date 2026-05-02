@@ -2,7 +2,7 @@
 Каталоги FAISS относительно рабочей директории процесса (корень репозитория или /app в Docker).
 
 По умолчанию индексы лежат в подкаталогах **по провайдеру эмбеддинга** (как ``RAG_EMBEDDING_PROVIDER`` / ``LLM_PROVIDER``),
-чтобы параллельно хранить версии для yandex, openai, google, mistral:
+чтобы параллельно хранить версии для yandex, openai, google, mistral, openrouter:
 
 - профессии: ``{FAISS_PROFESSION_VECTOR_ROOT}/{provider}/`` (корень по умолчанию ``data/profession/profession_vector``)
 - курсы: ``{FAISS_COURSES_VECTOR_ROOT}/{provider}/`` (корень по умолчанию ``data/education/education_vector``)

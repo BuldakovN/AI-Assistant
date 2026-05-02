@@ -4,9 +4,11 @@
 """
 import os
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import requests
 from dotenv import load_dotenv
+
+from model.phoenix_tracing import trace_yandex_chat_completion, trace_yandex_tool_call
 
 load_dotenv()
 
@@ -87,8 +89,12 @@ class YandexAdapter(LLMAdapter):
     def chat_sync(self, messages: List[Dict[str, str]]) -> (str, int):
         """Синхронный чат через Yandex SDK"""
         # Yandex SDK ожидает список словарей с "role" и "text"
-        response = self.model.run(messages)
-        return response.alternatives[0].text, response.usage.completion_tokens
+
+        def _run():
+            response = self.model.run(messages)
+            return response.alternatives[0].text, response.usage.completion_tokens
+
+        return trace_yandex_chat_completion(model_name=self.model_name, messages=messages, fn=_run)
     
     def tool_call(self, message: str, tools: List[Dict], temperature: float = 0.6, max_tokens: int = 2000) -> Optional[Tuple]:
         """Выполняет tool call через Yandex API"""
@@ -112,12 +118,21 @@ class YandexAdapter(LLMAdapter):
                 }
             ]
         }
-        response = requests.post(url, headers=headers, json=payload)
-        result = response.json()['result']['alternatives'][0]['message']
-        llm_tokens = response.json()['result']['usage']['completionTokens']
-        if result.get('toolCallList'):
-            return result['toolCallList']['toolCalls'][0]['functionCall']['arguments'], int(llm_tokens)
-        return None, 0
+
+        def _run():
+            response = requests.post(url, headers=headers, json=payload)
+            result = response.json()['result']['alternatives'][0]['message']
+            llm_tokens = response.json()['result']['usage']['completionTokens']
+            if result.get('toolCallList'):
+                return result['toolCallList']['toolCalls'][0]['functionCall']['arguments'], int(llm_tokens)
+            return None, 0
+
+        return trace_yandex_tool_call(
+            model_name=self.model_name,
+            message=message,
+            tools=tools,
+            fn=_run,
+        )
 
 
 class LangchainAdapter(LLMAdapter):
@@ -129,7 +144,7 @@ class LangchainAdapter(LLMAdapter):
         
         Args:
             provider: Название провайдера ("openai", "openrouter", "anthropic", "google", "mistral", "yandex", etc.)
-            model_name: Название модели (если None, используется дефолтная для провайдера)
+            model_name: Название модели (если None, для openrouter — ``OPENROUTER_MODEL`` или ``OPENROUTER_BASE_URL``)
             **kwargs: Дополнительные параметры для инициализации (api_key, temperature, etc.)
         """
         self.provider = provider.lower()
@@ -138,6 +153,8 @@ class LangchainAdapter(LLMAdapter):
         self._llm = None
         self._chat_model = None
         self._init_model()
+        print('Provider:', provider)
+        print('Model name:', model_name)
     
     def _init_model(self):
         """Инициализирует модель в зависимости от провайдера"""
@@ -151,29 +168,46 @@ class LangchainAdapter(LLMAdapter):
                 temperature=self.kwargs.get('temperature', 0.5)
             )
         elif self.provider == "openrouter":
-            from langchain_openai import ChatOpenAI
+            from langchain_openrouter import ChatOpenRouter
             api_key = self.kwargs.get('api_key') or os.getenv('OPENROUTER_API_KEY')
             if not api_key:
                 raise ValueError("OPENROUTER_API_KEY должен быть установлен в переменных окружения")
 
-            model = self.model_name or self.kwargs.get('model', 'openai/gpt-4o-mini')
+            env_model = (os.getenv("OPENROUTER_MODEL") or "").strip()
+            # Дефолт как в env.example; бесплатные модели часто дают 400 Provider returned error
+            model = self.model_name or self.kwargs.get("model") or env_model or "openai/gpt-4o-mini"
             base_url = self.kwargs.get('base_url') or os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
-            http_referer = self.kwargs.get('http_referer') or os.getenv('OPENROUTER_HTTP_REFERER')
-            x_title = self.kwargs.get('x_title') or os.getenv('OPENROUTER_X_TITLE')
-
-            extra_headers = {}
-            if http_referer:
-                extra_headers["HTTP-Referer"] = http_referer
-            if x_title:
-                extra_headers["X-Title"] = x_title
-
-            self._chat_model = ChatOpenAI(
-                model=model,
-                api_key=api_key,
-                base_url=base_url,
-                temperature=self.kwargs.get('temperature', 0.5),
-                default_headers=extra_headers or None,
+            # ChatOpenRouter ожидает app_url / app_title; default_headers уходит в model_kwargs
+            # и ломает вызов OpenRouter SDK (Chat.send не принимает default_headers).
+            app_url = (
+                self.kwargs.get("app_url")
+                or os.getenv("OPENROUTER_APP_URL")
+                or self.kwargs.get("http_referer")
+                or os.getenv("OPENROUTER_HTTP_REFERER")
             )
+            app_title = (
+                self.kwargs.get("app_title")
+                or os.getenv("OPENROUTER_APP_TITLE")
+                or self.kwargs.get("x_title")
+                or os.getenv("OPENROUTER_X_TITLE")
+            )
+
+            print("Base URL:", base_url)
+            print("OpenRouter model id:", model)
+
+            router_kwargs = {
+                "model": model,
+                "api_key": api_key,
+                "base_url": base_url,
+                "temperature": self.kwargs.get("temperature", 0.5),
+            }
+            if app_url:
+                router_kwargs["app_url"] = app_url
+            if app_title:
+                router_kwargs["app_title"] = app_title
+
+            self._chat_model = ChatOpenRouter(**router_kwargs)
+        
         elif self.provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
             api_key = self.kwargs.get('api_key') or os.getenv('ANTHROPIC_API_KEY')
@@ -215,16 +249,41 @@ class LangchainAdapter(LLMAdapter):
         else:
             raise ValueError(f"Неподдерживаемый провайдер: {self.provider}. "
                            f"Поддерживаются: openai, openrouter, anthropic, google, mistral, yandex")
+
+    @staticmethod
+    def _coerce_message_text(raw: Any) -> str:
+        """Текст сообщения для LangChain: str или OpenAI-style list блоков из CRUD/истории."""
+        if raw is None:
+            return ""
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, list):
+            parts: List[str] = []
+            for block in raw:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    if block.get("type") == "text" and isinstance(block.get("text"), str):
+                        parts.append(block["text"])
+                    elif isinstance(block.get("content"), str):
+                        parts.append(block["content"])
+            return "\n".join(parts)
+        return str(raw)
     
-    def _convert_messages(self, messages: List[Dict[str, str]]):
+    def _convert_messages(self, messages: List[Dict[str, Any]]):
         """Конвертирует сообщения из формата приложения в формат Langchain"""
         from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
         
         langchain_messages = []
         for msg in messages:
-            role = msg.get("role", "user")
-            text = msg.get("text", "") or msg.get("content", "")
-            
+            role = (msg.get("role") or "user").strip().lower()
+            text = self._coerce_message_text(msg.get("text"))
+            if not text.strip():
+                text = self._coerce_message_text(msg.get("content"))
+            text = text.strip()
+            if not text:
+                continue
+
             if role == "system":
                 langchain_messages.append(SystemMessage(content=text))
             elif role == "user":
@@ -232,9 +291,11 @@ class LangchainAdapter(LLMAdapter):
             elif role == "assistant":
                 langchain_messages.append(AIMessage(content=text))
             else:
-                # По умолчанию считаем user сообщением
                 langchain_messages.append(HumanMessage(content=text))
-        
+
+        if not langchain_messages:
+            langchain_messages.append(HumanMessage(content="."))
+
         return langchain_messages
     
     async def chat(self, messages: List[Dict[str, str]]) -> str:

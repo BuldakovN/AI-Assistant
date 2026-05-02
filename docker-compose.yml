@@ -22,6 +22,8 @@ services:
       context: .
       dockerfile: vector_store/Dockerfile
     container_name: ai-gigaschool-vector-store
+    ports:
+      - "8030:8030"
     env_file:
       - .env
     environment:
@@ -29,6 +31,10 @@ services:
       - YANDEX_CLOUD_FOLDER=${YANDEX_CLOUD_FOLDER:-}
       - YANDEX_CLOUD_API_KEY=${YANDEX_CLOUD_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - OPENROUTER_HTTP_REFERER=${OPENROUTER_HTTP_REFERER:-}
+      - OPENROUTER_X_TITLE=${OPENROUTER_X_TITLE:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-}
@@ -36,6 +42,7 @@ services:
       - RAG_YANDEX_EMBEDDING_DOC_MODEL=${RAG_YANDEX_EMBEDDING_DOC_MODEL:-}
       - RAG_YANDEX_EMBEDDING_MODEL_VERSION=${RAG_YANDEX_EMBEDDING_MODEL_VERSION:-}
       - RAG_OPENAI_EMBEDDING_MODEL=${RAG_OPENAI_EMBEDDING_MODEL:-}
+      - RAG_OPENROUTER_EMBEDDING_MODEL=${RAG_OPENROUTER_EMBEDDING_MODEL:-}
       - RAG_GOOGLE_EMBEDDING_MODEL=${RAG_GOOGLE_EMBEDDING_MODEL:-}
       - RAG_MISTRAL_EMBEDDING_MODEL=${RAG_MISTRAL_EMBEDDING_MODEL:-}
       - FAISS_PROFESSION_VECTOR_ROOT=${FAISS_PROFESSION_VECTOR_ROOT:-}
@@ -47,6 +54,22 @@ services:
       - VECTOR_STORE_LOG_LEVEL=${VECTOR_STORE_LOG_LEVEL:-INFO}
     volumes:
       - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - ai-gigaschool-network
+
+  # UI http://localhost:6006, OTLP HTTP на 6006 (/v1/traces), OTLP gRPC на 4317
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: ai-gigaschool-phoenix
+    pull_policy: if_not_present
+    ports:
+      - "6006:6006"
+      - "4317:4317"
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/data
+    volumes:
+      - phoenix_data:/mnt/data
     restart: unless-stopped
     networks:
       - ai-gigaschool-network
@@ -63,16 +86,27 @@ services:
       - YANDEX_CLOUD_FOLDER=${YANDEX_CLOUD_FOLDER:-}
       - YANDEX_CLOUD_API_KEY=${YANDEX_CLOUD_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - OPENROUTER_HTTP_REFERER=${OPENROUTER_HTTP_REFERER:-}
+      - OPENROUTER_X_TITLE=${OPENROUTER_X_TITLE:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - VECTOR_STORE_SERVICE_URL=http://vector-store:8030
       - LOG_ROOT=/app/logs
+      # Phoenix: PHOENIX_COLLECTOR_ENDPOINT — литерал (не из .env): в контейнере localhost ≠ хост.
+      - PHOENIX_TRACING_ENABLED=${PHOENIX_TRACING_ENABLED:-1}
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006
+      - PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME:-ai-gigaschool-llm}
+      - PHOENIX_OTLP_PROTOCOL=${PHOENIX_OTLP_PROTOCOL:-http/protobuf}
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
     depends_on:
       - vector-store
+      - phoenix
     networks:
       - ai-gigaschool-network
 
@@ -212,4 +246,6 @@ volumes:
   searxng-data:
     driver: local
   prometheus_data:
+    driver: local
+  phoenix_data:
     driver: local

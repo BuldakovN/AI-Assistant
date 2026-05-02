@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, KeyboardButton, Message, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from common.error_logging import setup_service_error_logging
 from config import config
@@ -140,8 +141,9 @@ class TelegramBot:
     def __init__(self) -> None:
         if not config.validate():
             raise ValueError("Некорректная конфигурация бота")
-
-        self.bot = Bot(token=config.bot_token)
+        proxy = config.proxy
+        session = AiohttpSession(proxy=proxy)
+        self.bot = Bot(token=config.bot_token, session=session)
         self.dp = Dispatcher()
         self.user_sessions: Dict[int, UserSession] = {}
         self.sender = SafeMessageSender(config.max_message_length, config.message_delay)

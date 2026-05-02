@@ -244,7 +244,18 @@ class DialogModel:
 
     @staticmethod
     async def check_response(ai_response: str) -> str:
-        return ai_response.split("Пользователь:")[0]
+        cleaned = ai_response.split("Пользователь:")[0]
+        # Защита от утечек внутреннего prompt-шаблона в пользовательский ответ.
+        leak_markers = (
+            "ТЕКУЩАЯ ЦЕЛЬ:",
+            "ПРЕДЫДУЩИЙ ВОПРОС АССИСТЕНТА:",
+            "ПРЕДЫДУЩИЙ ОТВЕТ ПОЛЬЗОВАТЕЛЯ:",
+            "🧭",
+        )
+        for marker in leak_markers:
+            if marker in cleaned:
+                cleaned = cleaned.split(marker, 1)[0].strip()
+        return cleaned.strip()
 
     async def start_talk(self, user_input: str, user_id: str, parameters: Optional[dict] = None) -> Any:
         parameters = parameters or {}
@@ -353,9 +364,14 @@ class DialogModel:
                 )
             else:
                 system_prompt = system_prompt.replace("# РЕКОМЕНДОВАННЫЕ ПРОФЕССИИ:", "")
-            if len(self.conversation_history[user_id]) == 0:
-                await self.add_system_message(system_prompt, user_id)
-            self.conversation_history[user_id].insert(0, {"role": "system", "text": system_prompt})
+            # В истории должен быть ровно один актуальный system prompt:
+            # раньше он дублировался на каждом ходе и раздувал контекст.
+            if not self.conversation_history[user_id]:
+                self.conversation_history[user_id].append({"role": "system", "text": system_prompt})
+            elif self.conversation_history[user_id][0].get("role") == "system":
+                self.conversation_history[user_id][0]["text"] = system_prompt
+            else:
+                self.conversation_history[user_id].insert(0, {"role": "system", "text": system_prompt})
             ai_response = await self.chat_loop(user_id, user_input)
             new_recommendation = await self.toll_run(ai_response, tool_name="is_recommendation_tool")
             if new_recommendation and new_recommendation.get("new_recommendation"):

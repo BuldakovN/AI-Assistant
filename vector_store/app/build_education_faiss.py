@@ -13,6 +13,7 @@ from app.store_paths import courses_index_dir
 def education_source_json_path() -> str:
     """Агрегированный JSON курсов. Переопределение: FAISS_EDUCATION_SOURCE_JSON."""
     override = (os.getenv("FAISS_EDUCATION_SOURCE_JSON") or "").strip()
+    print('override', override)
     if override:
         return override
     return os.path.join("data", "education", "education_comparison.json")
