@@ -39,14 +39,25 @@ from typing import Any, Optional
 
 from langchain_core.embeddings import Embeddings
 
+_EMBEDDING_PROVIDER_TYPOS = {
+    # частая опечатка в .env → иначе ValueError при /v1/search
+    "mistal": "mistral",
+}
+
+
+def _normalize_embedding_provider_slug(raw: str) -> str:
+    p = raw.strip().lower()
+    return _EMBEDDING_PROVIDER_TYPOS.get(p, p)
+
 
 def _llm_provider() -> str:
-    return (os.getenv("LLM_PROVIDER") or "yandex").strip().lower()
+    return _normalize_embedding_provider_slug((os.getenv("LLM_PROVIDER") or "yandex"))
 
 
 def _rag_embedding_provider() -> str:
     explicit = (os.getenv("RAG_EMBEDDING_PROVIDER") or "").strip().lower()
-    return explicit if explicit else _llm_provider()
+    chosen = explicit if explicit else _llm_provider()
+    return _normalize_embedding_provider_slug(chosen)
 
 
 def _build_yandex_embeddings(
@@ -198,7 +209,7 @@ def create_rag_embeddings(provider: Optional[str] = None, **kwargs: Any) -> Embe
             RAG_EMBEDDING_PROVIDER или LLM_PROVIDER.
         **kwargs: api_key, folder_id (Yandex), model_name и т.д.
     """
-    p = (provider or _rag_embedding_provider()).strip().lower()
+    p = _normalize_embedding_provider_slug((provider or _rag_embedding_provider()))
 
     if p == "anthropic":
         raise ValueError(

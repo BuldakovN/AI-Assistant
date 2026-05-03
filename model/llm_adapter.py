@@ -402,7 +402,9 @@ def create_llm_adapter(provider: str = "yandex", **kwargs) -> LLMAdapter:
         Экземпляр LLMAdapter
     """
     provider = provider.lower()
-    
+    if provider == "mistal":
+        provider = "mistral"
+
     if provider == "yandex":
         return YandexAdapter(
             folder_id=kwargs.get('folder_id'),

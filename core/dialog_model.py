@@ -15,7 +15,7 @@ import httpx
 import yaml
 from dotenv import load_dotenv
 
-from common.professions_normalize import normalize_ai_recommendation_json
+from common.professions_normalize import normalize_ai_recommendation_json, normalize_professions
 from common.rag_client import rag_search
 
 load_dotenv()
@@ -379,10 +379,17 @@ class DialogModel:
             ai_response = await self.chat_loop(user_id, user_input)
             new_recommendation = await self.toll_run(ai_response, tool_name="is_recommendation_tool")
             if new_recommendation and new_recommendation.get("new_recommendation"):
-                self.user_metadata[user_id]["ai_recommendation"] = ai_response
-                self.user_metadata[user_id]["ai_recommendation_json"] = normalize_ai_recommendation_json(
+                extracted = normalize_ai_recommendation_json(
                     await self.toll_run(ai_response, tool_name="make_json_tool")
                 )
+                profs = (
+                    normalize_professions(extracted.get("professions"))
+                    if isinstance(extracted, dict)
+                    else None
+                )
+                if profs:
+                    self.user_metadata[user_id]["ai_recommendation"] = ai_response
+                    self.user_metadata[user_id]["ai_recommendation_json"] = extracted
             return ai_response
 
         return None
