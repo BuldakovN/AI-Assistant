@@ -244,5 +244,12 @@ def get_rag_embeddings(
     api_key: Optional[str] = None,
     folder_id: Optional[str] = None,
 ) -> Embeddings:
-    """Совместимость с вызовами из поиска / сборки индекса (ключи Yandex)."""
-    return create_rag_embeddings(api_key=api_key, folder_id=folder_id)
+    """Совместимость с вызовами из поиска / сборки индекса (ключи Yandex).
+
+    Core всегда прокидывает в /v1/search ``api_key``/``folder_id`` из Yandex Cloud.
+    Для провайдеров Mistral/OpenAI/OpenRouter/Google эти поля не являются их API-ключами;
+    если передавать их в ``create_rag_embeddings``, Mistral получит чужой ключ и ответит 401.
+    """
+    if _rag_embedding_provider() == "yandex":
+        return create_rag_embeddings(api_key=api_key, folder_id=folder_id)
+    return create_rag_embeddings()

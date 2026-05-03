@@ -1,10 +1,11 @@
 """
-Refactored Telegram bot module.
+Telegram-бот: только приём/отправка сообщений. Состояние диалога — в CRUD и ответах core.
 """
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from aiogram import Bot, Dispatcher
@@ -36,22 +37,48 @@ FINISH_TEST_BUTTON = "🚫 Завершить тест"
 PROF_LIST_TEXT = "💼 Выберите интересующую профессию для получения подробной информации:"
 
 
-@dataclass
-class UserSession:
-    active: bool = True
-    message_count: int = 0
-    dialog_state: str = "who"
-    professions: List[Tuple[str, str]] = field(default_factory=list)
-    # test_run_version из последнего ответа core, если user_state был test
-    test_version_from_core: Optional[str] = None
+def professions_from_crud_payload(payload: Optional[Dict[str, Any]]) -> List[Tuple[str, str]]:
+    """Порядок имён: ``profession_order`` из core, иначе порядок ключей в ``professions``."""
+    if not payload:
+        return []
+    meta = payload.get("user_metadata") or {}
+    rec = meta.get("ai_recommendation_json") or {}
+    prof = rec.get("professions")
+    if not isinstance(prof, dict) or not prof:
+        return []
+    order = rec.get("profession_order")
+    if isinstance(order, list) and order:
+        keys: List[str] = []
+        seen: set[str] = set()
+        for k in order:
+            if isinstance(k, str) and k in prof and k not in seen:
+                keys.append(k)
+                seen.add(k)
+        for k in prof:
+            if k not in seen:
+                keys.append(k)
+    else:
+        keys = list(prof.keys())
+    return [(k, prof[k]) for k in keys]
+
+
+def crud_has_meaningful_session(payload: Optional[Dict[str, Any]]) -> bool:
+    if not payload:
+        return False
+    user_state = payload.get("user_state") or "who"
+    history = payload.get("conversation_history") or []
+    metadata = payload.get("user_metadata") or {}
+    return bool(
+        payload.get("app_user_id") is not None
+        or history
+        or metadata
+        or payload.get("user_type")
+        or user_state != "who"
+    )
 
 
 class SafeMessageSender:
-    """
-    Sends messages with:
-    - markdown parse fallback (disable parse mode on parse errors),
-    - long text splitting with markdown-safe boundaries.
-    """
+    """Markdown parse fallback; разбиение длинных сообщений."""
 
     def __init__(self, max_len: int, delay: float) -> None:
         self.max_len = max_len
@@ -118,7 +145,6 @@ class SafeMessageSender:
         if not candidates:
             return limit
 
-        # choose the rightmost markdown-safe candidate
         for pos in reversed(candidates):
             left = text[:pos]
             if self._is_markdown_balanced(left):
@@ -127,8 +153,6 @@ class SafeMessageSender:
 
     @staticmethod
     def _is_markdown_balanced(text: str) -> bool:
-        # Keep splitter conservative to avoid breaking inline markdown.
-        # This covers the most common parse breakers.
         star = text.count("*") % 2 == 0
         under = text.count("_") % 2 == 0
         backtick = text.count("`") % 2 == 0
@@ -145,7 +169,6 @@ class TelegramBot:
         session = AiohttpSession(proxy=proxy)
         self.bot = Bot(token=config.bot_token, session=session)
         self.dp = Dispatcher()
-        self.user_sessions: Dict[int, UserSession] = {}
         self.sender = SafeMessageSender(config.max_message_length, config.message_delay)
         self.cleanup_re = re.compile(r"#+\s|\*\*")
         self.link_deletus_re = re.compile(r"\[.+\](?=\()")
@@ -199,25 +222,11 @@ class TelegramBot:
     def _state_to_emoji(state: Optional[str]) -> str:
         return STATE_EMOJI.get((state or "").strip().lower(), "❓")
 
-    def _get_or_create_session(self, user_id: int) -> UserSession:
-        if user_id not in self.user_sessions:
-            self.user_sessions[user_id] = UserSession()
-        return self.user_sessions[user_id]
-
-    def _set_dialog_state(self, user_id: int, state: Optional[str]) -> None:
-        if state:
-            self._get_or_create_session(user_id).dialog_state = str(state)
-
-    async def _resolve_user_state(self, user_id: int) -> str:
-        cached = self.user_sessions.get(user_id)
-        if cached and cached.dialog_state:
-            return cached.dialog_state
-
+    async def _user_state_for_prefix(self, message: Message) -> str:
+        uid = message.from_user.id if message.from_user else 0
         async with LLMClient() as llm:
-            session = await llm.get_user_session(user_id)
-        state = str((session or {}).get("user_state") or "who")
-        self._set_dialog_state(user_id, state)
-        return state
+            session = await llm.get_user_session(uid)
+        return str((session or {}).get("user_state") or "who")
 
     async def _send_text(
         self,
@@ -225,9 +234,11 @@ class TelegramBot:
         text: str,
         parse_mode: Optional[str] = "Markdown",
         reply_markup: Any = None,
+        user_state: Optional[str] = None,
     ) -> None:
-        state = await self._resolve_user_state(message.from_user.id)
-        prefix = self._state_to_emoji(state)
+        if user_state is None:
+            user_state = await self._user_state_for_prefix(message)
+        prefix = self._state_to_emoji(user_state)
         await self.sender.send(
             message=message,
             text=self.sanitize_text(text),
@@ -246,36 +257,35 @@ class TelegramBot:
                 for item in bottoms:
                     kb.button(text=str(item))
             kb.row(KeyboardButton(text=FINISH_TEST_BUTTON))
+            placeholder = (
+                "Выберите вариант ответа или завершите тест"
+                if bottoms
+                else "Ответьте текстом или нажмите «Завершить тест»"
+            )
             return kb.as_markup(
                 resize_keyboard=True,
                 one_time_keyboard=False,
                 is_persistent=True,
-                input_field_placeholder="Выберите вариант ответа или завершите тест",
+                input_field_placeholder=placeholder,
             )
         return ReplyKeyboardRemove()
 
     async def _dispatch_llm_response(self, message: Message, resp: LLMResponse) -> None:
-        uid = message.from_user.id
-        self._set_dialog_state(uid, resp.user_state)
-        sess = self._get_or_create_session(uid)
-        if (resp.user_state or "").strip().lower() == "test":
-            tv = getattr(resp, "test_version", None)
-            sess.test_version_from_core = str(tv).strip() if tv is not None else None
-        else:
-            sess.test_version_from_core = None
+        us = resp.user_state
         markup = self._reply_markup_for_llm(resp)
         if (resp.msg or "").strip():
-            await self._send_text(message, resp.msg, reply_markup=markup)
+            await self._send_text(message, resp.msg, reply_markup=markup, user_state=us)
         if resp.professions:
             if not (resp.msg or "").strip():
-                await self._send_text(message, "\u2060", reply_markup=ReplyKeyboardRemove())
+                await self._send_text(
+                    message, "\u2060", reply_markup=ReplyKeyboardRemove(), user_state=us
+                )
             profession_list = list(resp.professions.items())
-            self._get_or_create_session(message.from_user.id).professions = profession_list
             kb = InlineKeyboardBuilder()
             for idx, (name, _) in enumerate(profession_list):
                 kb.button(text=name, callback_data=f"prof:{idx}")
             kb.adjust(2)
-            await self._send_text(message, PROF_LIST_TEXT, reply_markup=kb.as_markup())
+            await self._send_text(message, PROF_LIST_TEXT, reply_markup=kb.as_markup(), user_state=us)
 
     async def _show_typing_indicator(self, user_id: int) -> None:
         while True:
@@ -295,10 +305,6 @@ class TelegramBot:
 
     async def _handle_start(self, message: Message) -> None:
         user_id = message.from_user.id
-        self.user_sessions[user_id] = UserSession(active=True, message_count=0, dialog_state="who")
-        # Приверственное системное сообщение
-        #await self.bot.send_chat_action(user_id, "typing")
-        #await self._send_text(message, config.start_text)
         async with LLMClient() as llm:
             resp = await llm.generate_response("/start", user_id, parameters=self._request_parameters(message))
         await self._dispatch_llm_response(message, resp)
@@ -312,10 +318,7 @@ class TelegramBot:
         await self.bot.send_chat_action(user_id, "typing")
         async with LLMClient() as llm:
             text = await llm.clean_user_history(user_id)
-        session = self._get_or_create_session(user_id)
-        session.dialog_state = "who"
-        session.test_version_from_core = None
-        await self._send_text(message, text, reply_markup=ReplyKeyboardRemove())
+        await self._send_text(message, text, reply_markup=ReplyKeyboardRemove(), user_state="who")
 
     async def _handle_status(self, message: Message) -> None:
         user_id = message.from_user.id
@@ -327,52 +330,39 @@ class TelegramBot:
             return
 
         state = payload.get("user_state") or "who"
-        self._set_dialog_state(user_id, state)
         status_text = (
-            "Текущий статус диалога:\n\n"
+            "Текущий статус диалога (источник — CRUD):\n\n"
             f"- Фаза: `{state}`\n"
             f"- Тип пользователя: `{payload.get('user_type') or 'не определен'}`\n"
             f"- Сообщений в истории: `{len(payload.get('conversation_history') or [])}`\n"
             f"- Поля метаданных: `{', '.join(sorted((payload.get('user_metadata') or {}).keys())) or 'нет'}`\n"
-            f"- Локальная сессия в боте: `{'да' if user_id in self.user_sessions else 'нет'}`"
+            f"- Локальный кэш сессии в боте: не используется (stateless).\n"
         )
-        await self._send_text(message, status_text)
+        await self._send_text(message, status_text, user_state=state)
 
     async def _handle_status_local(self, message: Message) -> None:
         user_id = message.from_user.id
         await self.bot.send_chat_action(user_id, "typing")
-        had_local_session = user_id in self.user_sessions
-        restore_attempted = False
-        restore_success = False
-        if user_id not in self.user_sessions:
-            restore_attempted = True
-            restore_success = await self._restore_session_from_db(user_id)
-        session = self.user_sessions.get(user_id)
-        if not session:
-            await self._send_text(message, "Локальная сессия отсутствует в памяти бота для этого пользователя.")
-            return
-
         async with LLMClient() as llm:
             crud = await llm.get_user_session(user_id)
-        meta = (crud or {}).get("user_metadata") or {}
+        if not crud:
+            await self._send_text(message, "Не удалось прочитать сессию из CRUD.")
+            return
+
+        meta = crud.get("user_metadata") or {}
         ts = meta.get("test_session")
         ts_line = "нет"
         if isinstance(ts, dict):
             ts_line = f"index=`{ts.get('current_index')}`, ответов=`{len(ts.get('answers') or [])}`"
-        state_source = "memory" if had_local_session else ("crud_restored" if restore_success else "none")
-        local_status = (
-            "Локальный статус в TelegramBot:\n\n"
-            f"- state_source: `{state_source}`\n"
-            f"- restore_attempted_now: `{restore_attempted}`\n"
-            f"- restore_success_now: `{restore_success}`\n"
-            f"- active: `{session.active}`\n"
-            f"- message_count: `{session.message_count}`\n"
-            f"- professions в сессии: `{bool(session.professions)}`\n"
-            f"- dialog_state (кэш из графа): `{session.dialog_state}`\n"
-            f"- test_version (кэш из ответа core, при фазе test): `{session.test_version_from_core or 'нет'}`\n"
-            f"- test_session (из CRUD): `{ts_line}`"
+        po = (meta.get("ai_recommendation_json") or {}).get("profession_order")
+        po_line = ", ".join(str(x) for x in po) if isinstance(po, list) else "нет"
+        snap = (
+            "Снимок сессии (только CRUD; бот не хранит состояние в памяти):\n\n"
+            f"- user_state: `{crud.get('user_state') or 'who'}`\n"
+            f"- test_session: `{ts_line}`\n"
+            f"- profession_order в рекомендации: `{po_line}`\n"
         )
-        await self._send_text(message, local_status)
+        await self._send_text(message, snap, user_state=str(crud.get("user_state") or "who"))
 
     async def _handle_finish_test_command(self, message: Message) -> None:
         user_id = message.from_user.id
@@ -381,47 +371,15 @@ class TelegramBot:
             resp = await llm.finish_test_early(user_id, parameters=self._request_parameters(message))
         await self._dispatch_llm_response(message, resp)
 
-    async def _restore_session_from_db(self, user_id: int) -> bool:
-        async with LLMClient() as llm:
-            payload = await llm.get_user_session(user_id)
-        if not payload:
-            return False
-
-        user_state = payload.get("user_state") or "who"
-        metadata = payload.get("user_metadata") or {}
-        history = payload.get("conversation_history") or []
-        has_db = (
-            payload.get("app_user_id") is not None
-            or bool(history)
-            or bool(metadata)
-            or bool(payload.get("user_type"))
-            or user_state != "who"
-        )
-        if not has_db:
-            return False
-
-        session = self._get_or_create_session(user_id)
-        session.active = True
-        session.message_count = 0
-        session.dialog_state = str(user_state)
-        return True
-
     async def _handle_message(self, message: Message) -> None:
         user_id = message.from_user.id
         text = message.text or ""
 
-        if user_id not in self.user_sessions:
-            restored = await self._restore_session_from_db(user_id)
-            if not restored:
-                await self._send_text(message, "Пожалуйста, начните с команды /start")
-                return
-
-        session = self._get_or_create_session(user_id)
-        if not session.active:
+        async with LLMClient() as llm:
+            payload = await llm.get_user_session(user_id)
+        if not crud_has_meaningful_session(payload):
             await self._send_text(message, "Пожалуйста, начните с команды /start")
             return
-
-        session = self._get_or_create_session(user_id)
 
         if text == FINISH_TEST_BUTTON:
             await self.bot.send_chat_action(user_id, "typing")
@@ -430,7 +388,6 @@ class TelegramBot:
             await self._dispatch_llm_response(message, resp)
             return
 
-        session.message_count += 1
         typing_task = asyncio.create_task(self._show_typing_indicator(user_id))
         try:
             async with LLMClient() as llm:
@@ -464,7 +421,9 @@ class TelegramBot:
             await self._send_text(callback_query.message, "❌ Ошибка при обработке выбора профессии.")
             return
 
-        professions = self._get_or_create_session(user_id).professions
+        async with LLMClient() as llm:
+            payload = await llm.get_user_session(user_id)
+        professions = professions_from_crud_payload(payload)
         if not (0 <= index < len(professions)):
             await self._send_text(callback_query.message, "❌ Профессия не найдена. Попробуйте еще раз.")
             return
@@ -488,7 +447,9 @@ class TelegramBot:
         try:
             async with LLMClient() as llm:
                 resp = await llm.get_profession_info(profession_name, callback_query.from_user.id)
-            await self._send_text(callback_query.message, resp.msg, reply_markup=kb.as_markup())
+            await self._send_text(
+                callback_query.message, resp.msg, reply_markup=kb.as_markup(), user_state=resp.user_state
+            )
         except Exception:
             logger.exception("Ошибка при получении описания профессии %s", profession_name)
             await self._send_text(
@@ -509,7 +470,9 @@ class TelegramBot:
         try:
             async with LLMClient() as llm:
                 resp = await llm.get_profession_roadmap(profession_name, callback_query.from_user.id)
-            await self._send_text(callback_query.message, resp.msg, reply_markup=kb.as_markup())
+            await self._send_text(
+                callback_query.message, resp.msg, reply_markup=kb.as_markup(), user_state=resp.user_state
+            )
         except Exception:
             logger.exception("Ошибка при получении roadmap профессии %s", profession_name)
             await self._send_text(
@@ -523,8 +486,10 @@ class TelegramBot:
     async def _show_professions_list(self, callback_query: CallbackQuery) -> None:
         if not callback_query.message:
             return
-        session = self._get_or_create_session(callback_query.from_user.id)
-        if not session.professions:
+        async with LLMClient() as llm:
+            payload = await llm.get_user_session(callback_query.from_user.id)
+        professions = professions_from_crud_payload(payload)
+        if not professions:
             await self._send_text(
                 callback_query.message,
                 "❌ Список профессий не найден. Попробуйте начать новый диалог с помощью команды /start",
@@ -532,16 +497,18 @@ class TelegramBot:
             return
 
         kb = InlineKeyboardBuilder()
-        for idx, (name, _) in enumerate(session.professions):
+        for idx, (name, _) in enumerate(professions):
             kb.button(text=name, callback_data=f"prof:{idx}")
         kb.adjust(2)
 
-        state = await self._resolve_user_state(callback_query.from_user.id)
+        state = str((payload or {}).get("user_state") or "who")
         prefixed = f"{self._state_to_emoji(state)} {PROF_LIST_TEXT}"
         try:
             await callback_query.message.edit_text(prefixed, parse_mode="Markdown", reply_markup=kb.as_markup())
         except TelegramBadRequest:
-            await self._send_text(callback_query.message, PROF_LIST_TEXT, reply_markup=kb.as_markup())
+            await self._send_text(
+                callback_query.message, PROF_LIST_TEXT, reply_markup=kb.as_markup(), user_state=state
+            )
 
     async def start_polling(self) -> None:
         logger.info("Запуск бота...")

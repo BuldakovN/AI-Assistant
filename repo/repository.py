@@ -676,7 +676,7 @@ class Repository:
         return self.clear_identity_session("telegram", user_id)
 
     def clean_metadata(self, user_id: str) -> int:
-        """Совместимость с model/start_llm: полная очистка данных сессии для Telegram id."""
+        """Полная очистка данных сессии для Telegram id (совместимость со старым монолитом)."""
         return self.clear_identity_session("telegram", user_id)
 
     def get_metadata(self, user_id: str) -> dict:

@@ -10,7 +10,8 @@ from typing import Any, Dict, Literal, Optional, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from common.professions_normalize import normalize_professions
-from core.dialog_model import DialogModel, UserState
+from core.constants import UserState
+from core.dialog_model import DialogModel
 from core.injection_guard import detect_prompt_injection
 
 logger = logging.getLogger(__name__)
@@ -152,9 +153,9 @@ def build_turn_graph(model: DialogModel):
                         "prompt_snippet": (state.get("prompt") or "")[:240],
                     }
                 )
-                model.user_state[uid] = UserState.INJECT_ATTEMPT
+                model.set_user_state(uid, UserState.INJECT_ATTEMPT, "prompt_injection_blocked_placeholder")
                 await model.persist(uid)
-                model.user_state[uid] = prev
+                model.set_user_state(uid, prev, "prompt_injection_restore_phase")
                 await model.persist(uid)
             else:
                 await model.persist(uid)

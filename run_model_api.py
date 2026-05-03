@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
 """
-Скрипт для запуска LLM API из папки model
+Запуск заглушки legacy API на :8000 (``model.main:app``).
+
+Монолитный диалог (``start_llm``) удалён; POST-эндпоинты отвечают 410.
+Для реального бота используйте **core** и **llm-service**.
 """
-import uvicorn
 import sys
 from pathlib import Path
 
-# Добавляем корневую директорию проекта в путь
-project_root = Path(__file__).parent.parent
+import uvicorn
+
+project_root = Path(__file__).resolve().parent
 sys.path.insert(0, str(project_root))
 
 if __name__ == "__main__":
-    print("🚀 Запуск LLM API...")
-    print("📡 API будет доступен по адресу: http://localhost:8000")
-    print("📋 Документация API: http://localhost:8000/docs")
-    print("⏹️ Для остановки нажмите Ctrl+C")
-    
+    print("Запуск legacy model API (заглушка)...")
+    print("http://localhost:8000 — только GET / и 410 на старые POST.")
+    print("Документация: http://localhost:8000/docs")
+    print("Остановка: Ctrl+C")
+
     try:
         uvicorn.run(
-            "itmo-hackathone.model.main:app",
+            "model.main:app",
             host="0.0.0.0",
             port=8000,
-            reload=True
+            reload=True,
         )
     except KeyboardInterrupt:
-        print("\n⏹️ API остановлен")
+        print("\nAPI остановлен")
     except Exception as e:
-        print(f"❌ Ошибка при запуске API: {e}")
+        print(f"Ошибка при запуске API: {e}")
         sys.exit(1)
-

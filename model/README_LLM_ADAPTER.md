@@ -45,38 +45,19 @@ export YANDEX_CLOUD_API_KEY=your_api_key
 
 ### Программная настройка
 
-Вы можете указать провайдер при создании экземпляра `Model`:
+Провайдер задаётся через ``model.llm_adapter.create_llm_adapter`` (все пути — LangChain, включая Yandex):
 
 ```python
-from start_llm import Model
+from model.llm_adapter import create_llm_adapter
 
-# Использование OpenAI
-model = Model(
-    llm_provider="openai",
-    api_key="your_openai_api_key",
-    model_name="gpt-4o-mini"  # опционально
-)
+# Yandex (по умолчанию в llm-service через LLM_PROVIDER=yandex)
+adapter = create_llm_adapter("yandex", folder_id="...", api_key="...")
 
-# Использование OpenRouter
-model = Model(
-    llm_provider="openrouter",
-    api_key="your_openrouter_api_key",
-    model_name="openai/gpt-4o-mini"  # опционально
-)
+# OpenAI
+adapter = create_llm_adapter("openai", model_name="gpt-4o-mini", api_key="...")
 
-# Использование Anthropic
-model = Model(
-    llm_provider="anthropic",
-    api_key="your_anthropic_api_key",
-    model_name="claude-3-5-sonnet-20241022"  # опционально
-)
-
-# Использование Google
-model = Model(
-    llm_provider="google",
-    api_key="your_google_api_key",
-    model_name="gemini-pro"  # опционально
-)
+# OpenRouter
+adapter = create_llm_adapter("openrouter", model_name="openai/gpt-4o-mini", api_key="...")
 ```
 
 ## Архитектура
