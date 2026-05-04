@@ -1,3 +1,4 @@
+# Префикс имён контейнеров задаётся в .env (подробнее см. env.example): DOCKER_CONTAINER_PREFIX
 version: '3.8'
 
 services:
@@ -5,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: crud-service/Dockerfile
-    container_name: ai-gigaschool-crud
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-crud
     env_file:
       - .env
     environment:
@@ -21,7 +22,7 @@ services:
     build:
       context: .
       dockerfile: vector_store/Dockerfile
-    container_name: ai-gigaschool-vector-store
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-vector-store
     env_file:
       - .env
     environment:
@@ -60,7 +61,7 @@ services:
   # UI http://localhost:6006, OTLP HTTP на 6006 (/v1/traces), OTLP gRPC на 4317
   phoenix:
     image: arizephoenix/phoenix:latest
-    container_name: ai-gigaschool-phoenix
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-phoenix
     pull_policy: if_not_present
     ports:
       - "6006:6006"
@@ -78,7 +79,7 @@ services:
     build:
       context: .
       dockerfile: model/Dockerfile.llm
-    container_name: ai-gigaschool-llm
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-llm
     env_file:
       - .env
     environment:
@@ -115,7 +116,7 @@ services:
     build:
       context: .
       dockerfile: core/Dockerfile
-    container_name: ai-gigaschool-core
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-core
     env_file:
       - .env
     # RAG/FAISS — в сервисе vector-store; пересборка через Core (прокси) или напрямую vector-store:8030
@@ -150,7 +151,7 @@ services:
     build:
       context: .
       dockerfile: tg-module/Dockerfile
-    container_name: ai-gigaschool-bot
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-bot
     env_file:
       - .env
     environment:
@@ -173,7 +174,7 @@ services:
       - ai-outer-network
 
   searxng:
-    container_name: searxng
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-searxng
     image: docker.io/searxng/searxng:latest
     pull_policy: if_not_present
     restart: unless-stopped
@@ -198,7 +199,7 @@ services:
     build:
       context: ./web_search/simple_tavily_adapter
       dockerfile: Dockerfile
-    container_name: tavily-adapter
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-tavily-adapter
     restart: unless-stopped
     networks:
       - ai-internal-network
@@ -220,7 +221,7 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: ai-gigaschool-prometheus
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-prometheus
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
