@@ -3,7 +3,9 @@
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -148,7 +150,6 @@ class LangchainAdapter(LLMAdapter):
                 f"Неподдерживаемый провайдер: {self.provider}. "
                 f"Поддерживаются: openai, openrouter, anthropic, google, mistral, yandex"
             )
-        print('MODEL:', model)
 
     @staticmethod
     def _coerce_message_text(raw: Any) -> str:
@@ -228,6 +229,101 @@ class LangchainAdapter(LLMAdapter):
                     if isinstance(v, int):
                         return v
         return 0
+
+    @staticmethod
+    def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+        s = (text or "").strip()
+        if not s:
+            return None
+        fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
+        if fence:
+            s = fence.group(1).strip()
+        try:
+            val = json.loads(s)
+            return val if isinstance(val, dict) else None
+        except json.JSONDecodeError:
+            pass
+        start = s.find("{")
+        if start < 0:
+            return None
+        depth = 0
+        for i in range(start, len(s)):
+            if s[i] == "{":
+                depth += 1
+            elif s[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        val = json.loads(s[start : i + 1])
+                        return val if isinstance(val, dict) else None
+                    except json.JSONDecodeError:
+                        return None
+        return None
+
+    @staticmethod
+    def _args_from_parsed_json(data: Dict[str, Any], tools: List[Dict]) -> Optional[Dict[str, Any]]:
+        functions = [t["function"] for t in tools if isinstance(t, dict) and "function" in t]
+        if not functions:
+            return None
+        inner = data.get("arguments")
+        if isinstance(inner, dict):
+            return inner
+        if len(functions) == 1:
+            params = functions[0].get("parameters") or {}
+            props = params.get("properties") if isinstance(params, dict) else None
+            keys = set(props.keys()) if isinstance(props, dict) else None
+            if keys:
+                picked = {k: v for k, v in data.items() if k in keys}
+                if picked:
+                    return picked
+            if "name" not in data:
+                return data or None
+        return None
+
+    def _tool_call_via_json_prompt(
+        self,
+        bound: Any,
+        message: str,
+        tools: List[Dict],
+    ) -> Tuple[Optional[Any], int]:
+        """Для моделей без bind_tools (например ChatYandexGPT): один JSON с arguments по схеме."""
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        blocks: List[str] = []
+        names: List[str] = []
+        for t in tools:
+            fn = t.get("function") if isinstance(t, dict) else None
+            if not isinstance(fn, dict):
+                continue
+            n = fn.get("name")
+            if isinstance(n, str) and n:
+                names.append(n)
+            try:
+                blocks.append(json.dumps(fn, ensure_ascii=False))
+            except (TypeError, ValueError):
+                blocks.append(str(fn))
+
+        names_csv = ", ".join(repr(n) for n in names) if names else "(нет имён)"
+        catalog = "\n---\n".join(blocks) if blocks else "{}"
+
+        system = (
+            "Ты вызываешь ровно один инструмент. Ответь ТОЛЬКО одним JSON-объектом, без текста до и после, "
+            "без markdown.\n"
+            "Формат:\n"
+            '- если инструмент один: {"arguments": { ...поля по parameters.properties... }}\n'
+            "- если инструментов несколько: "
+            '{"name": "<имя_функции>", "arguments": { ... }}\n'
+            f"Допустимые имена функций: {names_csv}.\n\n"
+            "Схемы функций (OpenAI function JSON):\n"
+            f"{catalog}"
+        )
+        response = bound.invoke([SystemMessage(content=system), HumanMessage(content=message)])
+        tokens = self._lc_completion_tokens(response)
+        raw_text = self._lc_response_text(response)
+        payload = self._extract_json_object(raw_text)
+        if not payload:
+            return None, tokens
+        return self._args_from_parsed_json(payload, tools), tokens
 
     async def chat(self, messages: List[Dict[str, str]]) -> str:
         text, _tokens = self.chat_sync(messages)
@@ -310,7 +406,10 @@ class LangchainAdapter(LLMAdapter):
             bound = self._chat_model.bind(temperature=temperature, max_tokens=max_tokens)
         except TypeError:
             bound = self._chat_model
-        model_with_tools = bound.bind_tools(langchain_tools)
+        try:
+            model_with_tools = bound.bind_tools(langchain_tools)
+        except NotImplementedError:
+            return self._tool_call_via_json_prompt(bound, message, tools)
         return _invoke_model(model_with_tools)
 
 

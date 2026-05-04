@@ -35,6 +35,7 @@ STATE_EMOJI = {
 
 FINISH_TEST_BUTTON = "🚫 Завершить тест"
 PROF_LIST_TEXT = "💼 Выберите интересующую профессию для получения подробной информации:"
+PROF_PREPARE_HINT = "⏳ Дайте пару секунд — готовлю подробную информацию."
 
 
 def professions_from_crud_payload(payload: Optional[Dict[str, Any]]) -> List[Tuple[str, str]]:
@@ -429,16 +430,26 @@ class TelegramBot:
             return
 
         profession_name, _ = professions[index]
+        prof_state = str((payload or {}).get("user_state") or "recommendation")
         if data.startswith("prof:"):
-            await self._show_profession_details(callback_query, profession_name, index)
+            await self._show_profession_details(callback_query, profession_name, index, user_state=prof_state)
         elif data.startswith("road:"):
-            await self._show_profession_roadmap(callback_query, profession_name)
+            await self._show_profession_roadmap(callback_query, profession_name, user_state=prof_state)
         else:
             await self._send_text(callback_query.message, "❌ Ошибка при обработке выбора профессии.")
 
-    async def _show_profession_details(self, callback_query: CallbackQuery, profession_name: str, index: int) -> None:
+    async def _show_profession_details(
+        self,
+        callback_query: CallbackQuery,
+        profession_name: str,
+        index: int,
+        *,
+        user_state: Optional[str] = None,
+    ) -> None:
         if not callback_query.message:
             return
+        us = user_state or await self._user_state_for_prefix(callback_query.message)
+        await self._send_text(callback_query.message, PROF_PREPARE_HINT, user_state=us)
         typing_task = asyncio.create_task(self._show_typing_indicator(callback_query.from_user.id))
         kb = InlineKeyboardBuilder()
         kb.button(text="🔙 Назад к списку профессий", callback_data="back_to_professions")
@@ -448,7 +459,7 @@ class TelegramBot:
             async with LLMClient() as llm:
                 resp = await llm.get_profession_info(profession_name, callback_query.from_user.id)
             await self._send_text(
-                callback_query.message, resp.msg, reply_markup=kb.as_markup(), user_state=resp.user_state
+                callback_query.message, resp.msg, reply_markup=kb.as_markup(), user_state=resp.user_state or us
             )
         except Exception:
             logger.exception("Ошибка при получении описания профессии %s", profession_name)
@@ -456,13 +467,22 @@ class TelegramBot:
                 callback_query.message,
                 f"📋 **{profession_name}**\n\nИзвините, не удалось получить подробное описание этой профессии.",
                 reply_markup=kb.as_markup(),
+                user_state=us,
             )
         finally:
             typing_task.cancel()
 
-    async def _show_profession_roadmap(self, callback_query: CallbackQuery, profession_name: str) -> None:
+    async def _show_profession_roadmap(
+        self,
+        callback_query: CallbackQuery,
+        profession_name: str,
+        *,
+        user_state: Optional[str] = None,
+    ) -> None:
         if not callback_query.message:
             return
+        us = user_state or await self._user_state_for_prefix(callback_query.message)
+        await self._send_text(callback_query.message, PROF_PREPARE_HINT, user_state=us)
         typing_task = asyncio.create_task(self._show_typing_indicator(callback_query.from_user.id))
         kb = InlineKeyboardBuilder()
         kb.button(text="🔙 Назад к списку профессий", callback_data="back_to_professions")
@@ -471,7 +491,7 @@ class TelegramBot:
             async with LLMClient() as llm:
                 resp = await llm.get_profession_roadmap(profession_name, callback_query.from_user.id)
             await self._send_text(
-                callback_query.message, resp.msg, reply_markup=kb.as_markup(), user_state=resp.user_state
+                callback_query.message, resp.msg, reply_markup=kb.as_markup(), user_state=resp.user_state or us
             )
         except Exception:
             logger.exception("Ошибка при получении roadmap профессии %s", profession_name)
@@ -479,6 +499,7 @@ class TelegramBot:
                 callback_query.message,
                 f"📋 **{profession_name}**\n\nИзвините, не удалось получить подробное описание этой профессии.",
                 reply_markup=kb.as_markup(),
+                user_state=us,
             )
         finally:
             typing_task.cancel()
