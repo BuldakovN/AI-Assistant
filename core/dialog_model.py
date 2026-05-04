@@ -60,6 +60,7 @@ class DialogModel:
         self._web_search = None
         self._test_v1 = TestFlowV1()
         self._test_v2 = TestFlowV2()
+        print('SKIP TEST:', self.skip_test_v1)
 
     def set_user_state(self, user_id: str, new_state: str, reason: str) -> None:
         """Пишет ``user_state`` и логирует смену фазы (если значение изменилось)."""
