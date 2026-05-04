@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 __all__ = ["DialogModel", "UserState", "UserType"]
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _attach_profession_order(blob: Any) -> Any:
     if not isinstance(blob, dict):
         return blob
@@ -48,6 +55,7 @@ class DialogModel:
         self.user_type: Dict[str, Optional[str]] = {}
         self.user_metadata: Dict[str, Dict[str, Any]] = {}
         self.test_variant = (os.getenv("test_run_version") or "v2").strip()
+        self.skip_test_v1 = _env_flag("SKIP_TEST_V1_TO_RECOMMENDATION", default=False)
         self.user_last_seen: Dict[str, datetime] = {}
         self._web_search = None
         self._test_v1 = TestFlowV1()
@@ -299,6 +307,18 @@ class DialogModel:
                 continue
 
             if st == UserState.TEST:
+                if self.test_variant == "v1" and self.skip_test_v1:
+                    self.user_metadata[user_id]["test_user"] = (
+                        "Этап тестирования v1 был пропущен по системной настройке."
+                    )
+                    self.set_user_state(
+                        user_id,
+                        UserState.RECOMMENDATION,
+                        "skip_test_v1_to_recommendation_env_flag",
+                    )
+                    self.conversation_history[user_id] = []
+                    current_input = None
+                    continue
                 if self.test_variant == "v2":
                     if not self.user_metadata[user_id].get("test_for_user"):
                         return await self._test_v2.recommend_entry(self, user_id)
