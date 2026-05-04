@@ -1,19 +1,18 @@
 """
 Опциональная отправка трейсов в Arize Phoenix (OTLP).
 Включается через PHOENIX_TRACING_ENABLED=1; register() должен выполниться до импорта LangChain.
+
+Вызовы LLM идут через LangChain (все провайдеры, включая Yandex); те же цепочки
+покрываются ``openinference-instrumentation-langchain`` при ``auto_instrument=True``.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-from typing import Any, Callable, Dict, List, TypeVar
 
 logger = logging.getLogger(__name__)
 
 PHOENIX_TRACING_ACTIVE = False
-
-R = TypeVar("R")
 
 
 def _env_flag(name: str) -> bool:
@@ -32,16 +31,6 @@ def _collector_endpoint_for_protocol(endpoint: str, protocol: str) -> str:
     if base.endswith("/v1/traces"):
         return base
     return f"{base}/v1/traces"
-
-
-def _json_preview(obj: Any, max_chars: int = 16000) -> str:
-    try:
-        s = json.dumps(obj, ensure_ascii=False)
-    except TypeError:
-        s = repr(obj)
-    if len(s) <= max_chars:
-        return s
-    return s[:max_chars] + f"...(+{len(s) - max_chars} chars)"
 
 
 def setup_phoenix_if_enabled() -> None:
@@ -86,71 +75,3 @@ def setup_phoenix_if_enabled() -> None:
         project_name,
         protocol,
     )
-
-
-def trace_yandex_chat_completion(
-    *,
-    model_name: str,
-    messages: List[Dict[str, Any]],
-    fn: Callable[[], R],
-) -> R:
-    if not PHOENIX_TRACING_ACTIVE:
-        return fn()
-    from opentelemetry import trace
-    from opentelemetry.trace import Status, StatusCode
-    from openinference.semconv.trace import OpenInferenceMimeTypeValues, OpenInferenceSpanKindValues, SpanAttributes
-
-    tracer = trace.get_tracer(__name__)
-    with tracer.start_as_current_span("yandex.chat_completion") as span:
-        span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.LLM.value)
-        span.set_attribute(SpanAttributes.LLM_MODEL_NAME, model_name)
-        span.set_attribute(SpanAttributes.INPUT_VALUE, _json_preview(messages))
-        span.set_attribute(SpanAttributes.INPUT_MIME_TYPE, OpenInferenceMimeTypeValues.JSON.value)
-        try:
-            text, tokens = fn()
-        except Exception as exc:
-            span.record_exception(exc)
-            span.set_status(Status(StatusCode.ERROR, str(exc)))
-            raise
-        span.set_attribute(SpanAttributes.OUTPUT_VALUE, _json_preview(text))
-        span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, OpenInferenceMimeTypeValues.TEXT.value)
-        if tokens is not None:
-            span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, int(tokens))
-        span.set_status(Status(StatusCode.OK))
-        return text, tokens  # type: ignore[return-value]
-
-
-def trace_yandex_tool_call(
-    *,
-    model_name: str,
-    message: str,
-    tools: List[Dict[str, Any]],
-    fn: Callable[[], R],
-) -> R:
-    if not PHOENIX_TRACING_ACTIVE:
-        return fn()
-    from opentelemetry import trace
-    from opentelemetry.trace import Status, StatusCode
-    from openinference.semconv.trace import OpenInferenceMimeTypeValues, OpenInferenceSpanKindValues, SpanAttributes
-
-    tracer = trace.get_tracer(__name__)
-    with tracer.start_as_current_span("yandex.tool_call") as span:
-        span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, OpenInferenceSpanKindValues.LLM.value)
-        span.set_attribute(SpanAttributes.LLM_MODEL_NAME, model_name)
-        span.set_attribute(
-            SpanAttributes.INPUT_VALUE,
-            _json_preview({"message": message, "tools": tools}),
-        )
-        span.set_attribute(SpanAttributes.INPUT_MIME_TYPE, OpenInferenceMimeTypeValues.JSON.value)
-        try:
-            result, tokens = fn()
-        except Exception as exc:
-            span.record_exception(exc)
-            span.set_status(Status(StatusCode.ERROR, str(exc)))
-            raise
-        span.set_attribute(SpanAttributes.OUTPUT_VALUE, _json_preview(result))
-        span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, OpenInferenceMimeTypeValues.JSON.value)
-        if tokens is not None:
-            span.set_attribute(SpanAttributes.LLM_TOKEN_COUNT_COMPLETION, int(tokens))
-        span.set_status(Status(StatusCode.OK))
-        return result, tokens  # type: ignore[return-value]

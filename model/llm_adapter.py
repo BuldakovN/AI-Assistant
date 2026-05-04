@@ -9,8 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from dotenv import load_dotenv
 
-from model.phoenix_tracing import trace_yandex_chat_completion, trace_yandex_tool_call
-
 load_dotenv()
 
 
@@ -44,7 +42,6 @@ class LangchainAdapter(LLMAdapter):
         self.model_name = model_name
         self.kwargs = kwargs
         self._chat_model: Any = None
-        self._tracing_model_name: str = ""
         self._init_model()
 
     def _init_model(self) -> None:
@@ -53,7 +50,6 @@ class LangchainAdapter(LLMAdapter):
 
             api_key = self.kwargs.get("api_key") or os.getenv("OPENAI_API_KEY")
             model = self.model_name or self.kwargs.get("model", "gpt-4o-mini")
-            self._tracing_model_name = str(model)
             self._chat_model = ChatOpenAI(
                 model=model,
                 api_key=api_key,
@@ -95,7 +91,6 @@ class LangchainAdapter(LLMAdapter):
             if app_title:
                 router_kwargs["app_title"] = app_title
 
-            self._tracing_model_name = str(model)
             self._chat_model = ChatOpenRouter(**router_kwargs)
 
         elif self.provider == "anthropic":
@@ -103,7 +98,6 @@ class LangchainAdapter(LLMAdapter):
 
             api_key = self.kwargs.get("api_key") or os.getenv("ANTHROPIC_API_KEY")
             model = self.model_name or self.kwargs.get("model", "claude-3-5-sonnet-20241022")
-            self._tracing_model_name = str(model)
             self._chat_model = ChatAnthropic(
                 model=model,
                 api_key=api_key,
@@ -114,7 +108,6 @@ class LangchainAdapter(LLMAdapter):
 
             api_key = self.kwargs.get("api_key") or os.getenv("GOOGLE_API_KEY")
             model = self.model_name or self.kwargs.get("model", "gemini-pro")
-            self._tracing_model_name = str(model)
             self._chat_model = ChatGoogleGenerativeAI(
                 model=model,
                 google_api_key=api_key,
@@ -127,7 +120,6 @@ class LangchainAdapter(LLMAdapter):
             if not api_key:
                 raise ValueError("MISTRAL_API_KEY должен быть установлен в переменных окружения")
             model = self.model_name or self.kwargs.get("model", "mistral-small-latest")
-            self._tracing_model_name = str(model)
             self._chat_model = ChatMistralAI(
                 model=model,
                 mistral_api_key=api_key,
@@ -145,7 +137,6 @@ class LangchainAdapter(LLMAdapter):
                 or self.kwargs.get("model")
                 or os.getenv("YANDEX_CLOUD_MODEL", "yandexgpt-lite")
             )
-            self._tracing_model_name = str(model)
             self._chat_model = ChatYandexGPT(
                 api_key=api_key,
                 folder_id=folder_id,
@@ -157,6 +148,7 @@ class LangchainAdapter(LLMAdapter):
                 f"Неподдерживаемый провайдер: {self.provider}. "
                 f"Поддерживаются: openai, openrouter, anthropic, google, mistral, yandex"
             )
+        print('MODEL:', model)
 
     @staticmethod
     def _coerce_message_text(raw: Any) -> str:
@@ -243,18 +235,8 @@ class LangchainAdapter(LLMAdapter):
 
     def chat_sync(self, messages: List[Dict[str, Any]]) -> Tuple[str, int]:
         langchain_messages = self._convert_messages(messages)
-
-        def _run() -> Tuple[str, int]:
-            response = self._chat_model.invoke(langchain_messages)
-            return self._lc_response_text(response), self._lc_completion_tokens(response)
-
-        if self.provider == "yandex":
-            return trace_yandex_chat_completion(
-                model_name=self._tracing_model_name,
-                messages=messages,
-                fn=_run,
-            )
-        return _run()
+        response = self._chat_model.invoke(langchain_messages)
+        return self._lc_response_text(response), self._lc_completion_tokens(response)
 
     def tool_call(
         self,
@@ -324,22 +306,12 @@ class LangchainAdapter(LLMAdapter):
                     return tool_call0.get("args", {}), tokens
             return None, tokens
 
-        def _run() -> Tuple[Optional[Any], int]:
-            try:
-                bound = self._chat_model.bind(temperature=temperature, max_tokens=max_tokens)
-            except TypeError:
-                bound = self._chat_model
-            model_with_tools = bound.bind_tools(langchain_tools)
-            return _invoke_model(model_with_tools)
-
-        if self.provider == "yandex":
-            return trace_yandex_tool_call(
-                model_name=self._tracing_model_name,
-                message=message,
-                tools=tools,
-                fn=_run,
-            )
-        return _run()
+        try:
+            bound = self._chat_model.bind(temperature=temperature, max_tokens=max_tokens)
+        except TypeError:
+            bound = self._chat_model
+        model_with_tools = bound.bind_tools(langchain_tools)
+        return _invoke_model(model_with_tools)
 
 
 def create_llm_adapter(provider: str = "yandex", **kwargs: Any) -> LLMAdapter:
