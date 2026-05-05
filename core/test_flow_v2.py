@@ -18,6 +18,17 @@ class TestFlowV2:
             return str(desc_map[test_for_user])
         return str((prof_tests.get("test_description") or {}).get(test_for_user, ""))
 
+    def first_question_hint(self, test_for_user: str, bottoms: List[str]) -> str:
+        if bottoms and all(str(x).strip() in {"1", "2", "3", "4", "5"} for x in bottoms):
+            return "Сейчас оцените утверждение по шкале от 1 до 5, выбрав соответствующую кнопку."
+        if bottoms and all(str(x).strip() in {"А", "Б", "Ничего из этого"} for x in bottoms):
+            return "Сейчас выберите вариант ответа, который подходит вам больше всего."
+        if bottoms:
+            return "Сейчас нажмите кнопку с подходящим вариантом ответа."
+        # Fallback на случай неполного конфига для конкретного теста.
+        _ = test_for_user
+        return "Сейчас внимательно прочитайте вопрос и выберите подходящий вариант ответа."
+
     async def finalize_to_recommendation(self, dm: DialogModel, user_id: str, collected: List) -> None:
         meta = dm.user_metadata[user_id]
         test_for_user = meta.get("test_for_user")
@@ -98,10 +109,11 @@ class TestFlowV2:
             return None
 
         if idx == 0 and len(answers) == 0 and not prompt:
-            td = rt.get("test_description") or self.prof_test_description(meta["test_for_user"])
+            test_for_user = meta.get("test_for_user", "")
+            hint = self.first_question_hint(test_for_user, bottoms)
             return (
                 "Спасибо за ответы! Сейчас я проведу небольшой тест, чтобы на его основе подобрать профессии\n\n"
-                f"{td}\n\n{questions[0]}"
+                f"{hint}\n\n{questions[0]}"
             )
 
         if not prompt:
@@ -147,11 +159,11 @@ class TestFlowV2:
             "test_bottoms": test_bottoms,
         }
         dm.user_metadata[user_id]["test_session"] = {"current_index": 0, "answers": []}
-        td = self.prof_test_description(test_for_user)
+        hint = self.first_question_hint(test_for_user, test_bottoms)
         if not test_questions:
             return "Не удалось подобрать вопросы для теста. Попробуйте позже."
         q0 = test_questions[0]
         return (
             "Спасибо за ответы! Сейчас я проведу небольшой тест, чтобы на его основе подобрать профессии\n\n"
-            f"{td}\n\n{q0}"
+            f"{hint}\n\n{q0}"
         )
