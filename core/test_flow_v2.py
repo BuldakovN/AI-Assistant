@@ -19,7 +19,10 @@ class TestFlowV2:
         return str((prof_tests.get("test_description") or {}).get(test_for_user, ""))
 
     def first_question_hint(self, test_for_user: str, bottoms: List[str]) -> str:
-        if bottoms and all(str(x).strip() in {"1", "2", "3", "4", "5"} for x in bottoms):
+        bottoms_s = [str(x).strip() for x in bottoms]
+        if bottoms_s and all(x in {"1", "2", "3", "4", "5", "6"} for x in bottoms_s) and "6" in bottoms_s:
+            return "Сейчас оцените утверждение по шкале от 1 до 6, выбрав соответствующую кнопку."
+        if bottoms_s and all(x in {"1", "2", "3", "4", "5"} for x in bottoms_s):
             return "Сейчас оцените утверждение по шкале от 1 до 5, выбрав соответствующую кнопку."
         if bottoms and all(str(x).strip() in {"А", "Б", "Ничего из этого"} for x in bottoms):
             return "Сейчас выберите вариант ответа, который подходит вам больше всего."

@@ -1,0 +1,233 @@
+# Стек приложения без Phoenix для агентных REST-тестов.
+version: '3.8'
+
+services:
+  crud-service:
+    build:
+      context: .
+      dockerfile: crud-service/Dockerfile
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-crud
+    env_file:
+      - .env
+    environment:
+      - SQLITE_PATH=/app/persist/db_app.sqlite3
+    volumes:
+      - ./repo:/app/persist
+    restart: unless-stopped
+    networks:
+      - ai-internal-network
+
+  vector-store:
+    build:
+      context: .
+      dockerfile: vector_store/Dockerfile
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-vector-store
+    env_file:
+      - .env
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-yandex}
+      - YANDEX_CLOUD_FOLDER=${YANDEX_CLOUD_FOLDER:-}
+      - YANDEX_CLOUD_API_KEY=${YANDEX_CLOUD_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - OPENROUTER_HTTP_REFERER=${OPENROUTER_HTTP_REFERER:-}
+      - OPENROUTER_X_TITLE=${OPENROUTER_X_TITLE:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-}
+      - RAG_YANDEX_EMBEDDING_QUERY_MODEL=${RAG_YANDEX_EMBEDDING_QUERY_MODEL:-}
+      - RAG_YANDEX_EMBEDDING_DOC_MODEL=${RAG_YANDEX_EMBEDDING_DOC_MODEL:-}
+      - RAG_YANDEX_EMBEDDING_MODEL_VERSION=${RAG_YANDEX_EMBEDDING_MODEL_VERSION:-}
+      - RAG_OPENAI_EMBEDDING_MODEL=${RAG_OPENAI_EMBEDDING_MODEL:-}
+      - RAG_OPENROUTER_EMBEDDING_MODEL=${RAG_OPENROUTER_EMBEDDING_MODEL:-}
+      - RAG_GOOGLE_EMBEDDING_MODEL=${RAG_GOOGLE_EMBEDDING_MODEL:-}
+      - RAG_MISTRAL_EMBEDDING_MODEL=${RAG_MISTRAL_EMBEDDING_MODEL:-}
+      - FAISS_PROFESSION_VECTOR_ROOT=${FAISS_PROFESSION_VECTOR_ROOT:-}
+      - FAISS_COURSES_VECTOR_ROOT=${FAISS_COURSES_VECTOR_ROOT:-}
+      - FAISS_PROFESSION_INDEX_DIR=${FAISS_PROFESSION_INDEX_DIR:-}
+      - FAISS_COURSES_INDEX_DIR=${FAISS_COURSES_INDEX_DIR:-}
+      - FAISS_PROFESSION_SOURCE_JSON=${FAISS_PROFESSION_SOURCE_JSON:-}
+      - FAISS_EDUCATION_SOURCE_JSON=${FAISS_EDUCATION_SOURCE_JSON:-}
+      - VECTOR_STORE_LOG_LEVEL=${VECTOR_STORE_LOG_LEVEL:-INFO}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - ai-internal-network
+      - ai-outer-network
+
+  llm-service:
+    build:
+      context: .
+      dockerfile: model/Dockerfile.llm
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-llm
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-yandex}
+      - YANDEX_CLOUD_FOLDER=${YANDEX_CLOUD_FOLDER:-}
+      - YANDEX_CLOUD_API_KEY=${YANDEX_CLOUD_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - OPENROUTER_HTTP_REFERER=${OPENROUTER_HTTP_REFERER:-}
+      - OPENROUTER_X_TITLE=${OPENROUTER_X_TITLE:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - VECTOR_STORE_SERVICE_URL=http://vector-store:8030
+      - LOG_ROOT=/app/logs
+      - PHOENIX_TRACING_ENABLED=${PHOENIX_TRACING_ENABLED:-1}
+      - PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_COLLECTOR_ENDPOINT:-http://host.docker.internal:6006}
+      - PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME:-ai-gigaschool-llm}
+      - PHOENIX_OTLP_PROTOCOL=${PHOENIX_OTLP_PROTOCOL:-http/protobuf}
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - vector-store
+    networks:
+      - ai-internal-network
+      - ai-outer-network
+
+  core:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-core
+    env_file:
+      - .env
+    environment:
+      - CRUD_SERVICE_URL=http://crud-service:8010
+      - LLM_SERVICE_URL=http://llm-service:8001
+      - WEB_SEARCH_API_URL=http://tavily-adapter:1000
+      - LLM_PROVIDER=${LLM_PROVIDER:-yandex}
+      - YANDEX_CLOUD_FOLDER=${YANDEX_CLOUD_FOLDER:-}
+      - YANDEX_CLOUD_API_KEY=${YANDEX_CLOUD_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - test_run_version=${TEST_RUN_VERSION:-v1}
+      - SKIP_TEST_V1_TO_RECOMMENDATION=${SKIP_TEST_V1_TO_RECOMMENDATION:-0}
+      - VECTOR_STORE_SERVICE_URL=http://vector-store:8030
+      - CORE_REBUILD_FAISS_SECRET=${CORE_REBUILD_FAISS_SECRET:-}
+      - CORE_LOG_LEVEL=${CORE_LOG_LEVEL:-INFO}
+      - LOG_ROOT=/app/logs
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - crud-service
+      - llm-service
+      - tavily-adapter
+      - vector-store
+    networks:
+      - ai-internal-network
+
+  agent-rest-service:
+    build:
+      context: .
+      dockerfile: agent-rest-module/Dockerfile
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-agent-rest
+    env_file:
+      - .env
+    environment:
+      - LLM_API_URL=http://core:8020/start_talk/
+      - LLM_FINISH_TEST_URL=http://core:8020/finish_test_early/
+      - LLM_PROFESSION_API_URL=http://core:8020/get_profession_info/
+      - LLM_ROADMAP_API_URL=http://core:8020/get_profession_roadmap/
+      - LLM_CLEAN_API_URL=http://core:8020/clean_history/
+      - CRUD_SERVICE_URL=http://crud-service:8010
+      - AGENT_REST_HOST=0.0.0.0
+      - AGENT_REST_PORT=8040
+      - LOG_ROOT=/app/logs
+    volumes:
+      - ./logs:/app/logs
+      - ./aget-tests:/app/aget-tests
+    depends_on:
+      - core
+    restart: unless-stopped
+    networks:
+      - ai-internal-network
+      - ai-outer-network
+
+  searxng:
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-searxng
+    image: docker.io/searxng/searxng:latest
+    pull_policy: if_not_present
+    restart: unless-stopped
+    networks:
+      - ai-internal-network
+      - ai-outer-network
+    volumes:
+      - ./web_search/searxng:/etc/searxng:rw
+      - searxng-data:/var/cache/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+      - BIND_ADDRESS=[::]:8080
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  tavily-adapter:
+    build:
+      context: ./web_search/simple_tavily_adapter
+      dockerfile: Dockerfile
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-tavily-adapter
+    restart: unless-stopped
+    networks:
+      - ai-internal-network
+      - ai-outer-network
+    volumes:
+      - ./web_search/searxng:/srv/searxng-docker:ro
+    depends_on:
+      - searxng
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ${DOCKER_CONTAINER_PREFIX:-ai-gigaschool}-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    depends_on:
+      - core
+      - llm-service
+    networks:
+      - ai-internal-network
+
+networks:
+  ai-internal-network:
+    driver: bridge
+    internal: true
+  ai-outer-network:
+    driver: bridge
+
+volumes:
+  searxng-data:
+    driver: local
+  prometheus_data:
+    driver: local

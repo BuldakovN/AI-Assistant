@@ -8,3 +8,5 @@
 logs/
 docs/
 .cursor/
+agent-tests/
+scripts/
