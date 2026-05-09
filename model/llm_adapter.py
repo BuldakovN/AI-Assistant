@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from abc import ABC, abstractmethod
@@ -12,6 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class LLMAdapter(ABC):
@@ -389,18 +392,39 @@ class LangchainAdapter(LLMAdapter):
 
             langchain_tools.append(dynamic_tool)
 
-        def _invoke_model(bound_model: Any) -> Tuple[Optional[Any], int]:
-            response = bound_model.invoke([HumanMessage(content=message)])
-            tokens = self._lc_completion_tokens(response)
+        def _tool_args_from_response(response: Any, tokens: int) -> Tuple[Optional[Any], int]:
             if hasattr(response, "tool_calls") and response.tool_calls:
                 tool_call0 = response.tool_calls[0]
                 if isinstance(tool_call0, dict):
-                    return tool_call0.get("args", {}), tokens
+                    args = tool_call0.get("args")
+                    if args is None:
+                        raw = tool_call0.get("arguments")
+                        if isinstance(raw, str) and raw.strip():
+                            try:
+                                args = json.loads(raw)
+                            except json.JSONDecodeError:
+                                args = None
+                        elif isinstance(raw, dict):
+                            args = raw
+                    if args is None:
+                        args = tool_call0.get("args", {})
+                    return args, tokens
                 if hasattr(tool_call0, "args"):
                     return tool_call0.args, tokens
                 if hasattr(tool_call0, "get"):
                     return tool_call0.get("args", {}), tokens
+            raw_text = self._lc_response_text(response)
+            payload = self._extract_json_object(raw_text)
+            if payload:
+                args = self._args_from_parsed_json(payload, tools)
+                if args is not None:
+                    return args, tokens
             return None, tokens
+
+        def _invoke_model(bound_model: Any) -> Tuple[Optional[Any], int]:
+            response = bound_model.invoke([HumanMessage(content=message)])
+            tokens = self._lc_completion_tokens(response)
+            return _tool_args_from_response(response, tokens)
 
         try:
             bound = self._chat_model.bind(temperature=temperature, max_tokens=max_tokens)
@@ -410,7 +434,13 @@ class LangchainAdapter(LLMAdapter):
             model_with_tools = bound.bind_tools(langchain_tools)
         except NotImplementedError:
             return self._tool_call_via_json_prompt(bound, message, tools)
-        return _invoke_model(model_with_tools)
+        result, tokens = _invoke_model(model_with_tools)
+        if result is not None:
+            return result, tokens
+        logger.debug(
+            "tool_call: модель не вернула tool_calls и пригодный JSON в тексте — повтор через JSON-prompt"
+        )
+        return self._tool_call_via_json_prompt(bound, message, tools)
 
 
 def create_llm_adapter(provider: str = "yandex", **kwargs: Any) -> LLMAdapter:

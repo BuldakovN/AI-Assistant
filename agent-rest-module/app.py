@@ -27,6 +27,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 setup_service_error_logging("agent-rest-module")
 
+
+def _raise_http_for_core_failure(agent_id: str, operation: str, exc: BaseException) -> None:
+    if isinstance(exc, TimeoutError):
+        logger.warning("Timeout during %s for agent_id=%s", operation, agent_id)
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "Timed out waiting for the core LLM service. "
+                "Set CORE_HTTP_TIMEOUT_TOTAL_SECONDS (seconds, default 600) if generations are slow."
+            ),
+        ) from exc
+    logger.exception("Failed %s for agent_id=%s", operation, agent_id)
+    raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 app = FastAPI(
     title="Agent REST Module",
     description="REST adapter for automated agent-to-core interaction.",
@@ -72,8 +87,7 @@ async def start_session(payload: AgentStartRequest) -> AgentResponse:
             )
         return _to_response(payload.agent_id, payload.context, resp)
     except Exception as exc:
-        logger.exception("Failed to start session for agent_id=%s", payload.agent_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_http_for_core_failure(payload.agent_id, "start_session", exc)
 
 
 @app.post("/v1/sessions/{agent_id}/message", response_model=AgentResponse)
@@ -87,8 +101,7 @@ async def session_message(agent_id: str, payload: AgentMessageRequest) -> AgentR
             )
         return _to_response(agent_id, payload.context, resp)
     except Exception as exc:
-        logger.exception("Failed message call for agent_id=%s", agent_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_http_for_core_failure(agent_id, "session_message", exc)
 
 
 @app.post("/v1/sessions/{agent_id}/finish-test", response_model=AgentResponse)
@@ -98,8 +111,7 @@ async def finish_test(agent_id: str, payload: AgentActionRequest) -> AgentRespon
             resp = await client.finish_test_early(agent_id, parameters=payload.parameters)
         return _to_response(agent_id, payload.context, resp)
     except Exception as exc:
-        logger.exception("Failed finish-test call for agent_id=%s", agent_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_http_for_core_failure(agent_id, "finish_test", exc)
 
 
 @app.post("/v1/sessions/{agent_id}/clean-history")
@@ -113,8 +125,7 @@ async def clean_history(agent_id: str, payload: AgentActionRequest) -> dict:
             "context": payload.context.model_dump(),
         }
     except Exception as exc:
-        logger.exception("Failed clean-history call for agent_id=%s", agent_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_http_for_core_failure(agent_id, "clean_history", exc)
 
 
 @app.post("/v1/sessions/{agent_id}/profession-info", response_model=AgentResponse)
@@ -124,8 +135,7 @@ async def profession_info(agent_id: str, payload: ProfessionRequest) -> AgentRes
             resp = await client.get_profession_info(agent_id, payload.profession_name)
         return _to_response(agent_id, payload.context, resp)
     except Exception as exc:
-        logger.exception("Failed profession-info call for agent_id=%s", agent_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_http_for_core_failure(agent_id, "profession_info", exc)
 
 
 @app.post("/v1/sessions/{agent_id}/profession-roadmap", response_model=AgentResponse)
@@ -135,8 +145,7 @@ async def profession_roadmap(agent_id: str, payload: ProfessionRequest) -> Agent
             resp = await client.get_profession_roadmap(agent_id, payload.profession_name)
         return _to_response(agent_id, payload.context, resp)
     except Exception as exc:
-        logger.exception("Failed profession-roadmap call for agent_id=%s", agent_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_http_for_core_failure(agent_id, "profession_roadmap", exc)
 
 
 @app.get("/v1/sessions/{agent_id}", response_model=AgentSessionSnapshot)
@@ -153,6 +162,5 @@ async def get_session(agent_id: str) -> AgentSessionSnapshot:
             user_metadata=session.get("user_metadata") or {},
         )
     except Exception as exc:
-        logger.exception("Failed to fetch session for agent_id=%s", agent_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_http_for_core_failure(agent_id, "get_session", exc)
 

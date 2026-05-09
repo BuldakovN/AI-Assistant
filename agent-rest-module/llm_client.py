@@ -11,6 +11,19 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 
+def _client_timeout() -> aiohttp.ClientTimeout:
+    """HTTP timeouts for core LLM calls (full chain can take several minutes)."""
+    try:
+        total = float(os.getenv("CORE_HTTP_TIMEOUT_TOTAL_SECONDS", "600"))
+    except ValueError:
+        total = 600.0
+    try:
+        connect = float(os.getenv("CORE_HTTP_TIMEOUT_CONNECT_SECONDS", "30"))
+    except ValueError:
+        connect = 30.0
+    return aiohttp.ClientTimeout(total=total, connect=connect)
+
+
 @dataclass
 class LLMResponse:
     msg: str
@@ -34,7 +47,7 @@ class CoreApiClient:
             "LLM_FINISH_TEST_URL", "http://localhost:8020/finish_test_early/"
         )
         self.crud_base_url = os.getenv("CRUD_SERVICE_URL", "http://localhost:8010").rstrip("/")
-        self.timeout = aiohttp.ClientTimeout(total=120)
+        self.timeout = _client_timeout()
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def __aenter__(self) -> "CoreApiClient":

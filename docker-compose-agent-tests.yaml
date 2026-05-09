@@ -143,9 +143,15 @@ services:
       - LLM_ROADMAP_API_URL=http://core:8020/get_profession_roadmap/
       - LLM_CLEAN_API_URL=http://core:8020/clean_history/
       - CRUD_SERVICE_URL=http://crud-service:8010
+      # Один вызов core/start_talk может занимать минуты (цепочка LLM + инструменты)
+      - CORE_HTTP_TIMEOUT_TOTAL_SECONDS=${CORE_HTTP_TIMEOUT_TOTAL_SECONDS:-600}
+      - CORE_HTTP_TIMEOUT_CONNECT_SECONDS=${CORE_HTTP_TIMEOUT_CONNECT_SECONDS:-30}
       - AGENT_REST_HOST=0.0.0.0
       - AGENT_REST_PORT=8040
       - LOG_ROOT=/app/logs
+    # Хост → контейнер: агент-тестер на машине разработчика ходит на localhost:${AGENT_REST_PUBLISHED_PORT:-8040}
+    ports:
+      - "${AGENT_REST_PUBLISHED_PORT:-8040}:8040"
     volumes:
       - ./logs:/app/logs
       - ./aget-tests:/app/aget-tests
