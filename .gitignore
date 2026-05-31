@@ -1,2 +1,12 @@
 *.env
 #web_search/.env
+*.pyc
+*sqlite3
+.gitignore
+
+# Логи сервисов (docker bind mount ./logs)
+logs/
+docs/
+.cursor/
+agent-tests/
+scripts/

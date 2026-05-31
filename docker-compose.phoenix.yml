@@ -1,0 +1,24 @@
+# Отдельный стек только для Arize Phoenix (OTLP + UI в браузере).
+# Запуск: docker compose -f docker-compose.phoenix.yml --env-file .env up -d
+# Основной проект: docker compose --env-file .env up -d (llm-service шлёт трейсы на host:6006)
+name: gigaschool-phoenix
+
+version: "3.8"
+
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: common-phoenix
+    pull_policy: if_not_present
+    ports:
+      - "${PHOENIX_HOST_HTTP_PORT:-6006}:6006"
+      - "${PHOENIX_HOST_GRPC_PORT:-4317}:4317"
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/data
+    volumes:
+      - phoenix_data:/mnt/data
+    restart: unless-stopped
+
+volumes:
+  phoenix_data:
+    driver: local

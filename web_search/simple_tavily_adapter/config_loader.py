@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 class Config:
-    def __init__(self, config_path: str = "/srv/searxng-docker/config.yaml"):
+    def __init__(self, config_path: str = "/srv/searxng-docker/settings.yml"):
         self.config_path = Path(config_path)
         self._config = self._load_config()
     
@@ -15,7 +15,7 @@ class Config:
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
-        except FileNotFoundError:
+        except (FileNotFoundError, IsADirectoryError):
             # Fallback to default config
             return {
                 "adapter": {

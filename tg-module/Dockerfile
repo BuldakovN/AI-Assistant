@@ -1,11 +1,18 @@
 # Используем официальный Python образ
 FROM python:3.11-slim
 
+# CA для исходящего HTTPS (api.telegram.org и др.)
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем код модуля
+# Копируем общий модуль логирования и код бота
+COPY common/ ./common/
 COPY tg-module/ ./tg-module/
+
+RUN mkdir -p /app/logs
 
 # Копируем файл зависимостей
 #COPY tg-module/requirements.txt ./requirements.txt

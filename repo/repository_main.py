@@ -1,8 +1,9 @@
 import os
-from repository import Repository, RepositoryConfig
+from repository import DEFAULT_SQLITE_FILENAME, Repository, RepositoryConfig
+
 
 def main():
-    db_url = os.getenv("SQLITE_URL", "sqlite:///app.sqlite3")
+    db_url = os.getenv("SQLITE_URL", f"sqlite:///{DEFAULT_SQLITE_FILENAME}")
     repo = Repository(RepositoryConfig(db_url=db_url, echo=False))
     repo.create_schema()
     print(f"OK: schema created in {db_url}")

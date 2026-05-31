@@ -1,99 +1,66 @@
-from datetime import datetime
-from fastapi import FastAPI
-from shema import Message, Context, LLMResponse, ProfessionRequest
+"""
+Ранее здесь был монолитный API поверх ``start_llm.Model`` (удалён).
 
-from start_llm import Model
+Диалог и состояние — **core** (``POST /v1/dialog/turn`` и др.).
+Вызовы LLM — **llm-service** (``POST /v1/chat``, ``POST /v1/tool_call``).
+
+Этот модуль оставлен только чтобы не ломать ``model/app_run.py`` и старые ссылки на ``model.main:app``:
+все бывшие эндпоинты отвечают **410 Gone**.
+"""
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
-Model = Model()
-app = FastAPI()
+from model.shema import Context, ProfessionRequest
+
+app = FastAPI(title="Legacy model API (removed)", version="0.0.0")
 Instrumentator().instrument(app).expose(app)
+
+_GONE = {
+    "detail": (
+        "Монолитный API (start_llm) удалён. Используйте сервис **core** "
+        "(например POST /v1/dialog/turn) и **llm-service**."
+    )
+}
+
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the Model API"}
+    return {
+        "message": "Монолитный Model API отключён; используйте core + llm-service + crud.",
+        "removed": "model/start_llm.py",
+    }
+
+
+def _gone():
+    return JSONResponse(status_code=410, content=_GONE)
 
 
 @app.post("/start_talk/")
-async def predict(context: Context) -> LLMResponse:
-    try:
-        print(f"🔍 API получил запрос от пользователя {context.user_id}: {context.prompt}")
-        
-        response = await Model.start_talk(user_input=context.prompt, user_id=context.user_id,
-                                          parameters=context.parameters)
+async def predict(_context: Context):
+    return _gone()
 
-        # Получаем словарь профессий из метаданных пользователя, если они есть
-        # И если пользователь находится в состоянии TALK (после получения рекомендаций)
-        user_metadata = Model.user_metadata.get(context.user_id, {})
-        user_state = Model.user_state.get(context.user_id, None)
-        ai_recommendation_json = user_metadata.get('ai_recommendation_json')
-        recommended_test = user_metadata.get('recommended_test')
-        professions = None
-        
-        # Показываем профессии только если пользователь в состоянии TALK и есть рекомендации
-        if (user_state == "talk" and ai_recommendation_json and 
-            ai_recommendation_json.get('professions')):
-            professions = ai_recommendation_json['professions']
-            print(f"💼 Найдены профессии для пользователя в состоянии {user_state}: {list(professions.keys())}")
-        elif user_state == "test" and recommended_test and Model.test_variant == 'v2':
-            test_info = user_metadata['recommended_test']
-            return LLMResponse(msg=response, professions=None, test_info=test_info)
-
-        else:
-            print(f"ℹ️ Профессии не показываем. Состояние: {user_state}, есть рекомендации: {bool(ai_recommendation_json)}")
-        
-        result = LLMResponse(msg=response, professions=professions, test_info=None)
-        print(f"📤 Возвращаем результат с профессиями: {professions is not None}")
-        return result
-        
-    except Exception as e:
-        print(f"❌ Ошибка в API: {e}")
-        import traceback
-        traceback.print_exc()
-        return LLMResponse(msg=f"Ошибка: {str(e)}", professions=None, test_info=None)
 
 @app.post("/get_user_info/")
-async def get_user_info(context: Context):
-    response = Model.get_user_info(user_id=context.user_id)
-    return Message(user_id=context.user_id, msg=str(response), timestamp=str(datetime.now()))
+async def get_user_info(_context: Context):
+    return _gone()
 
 
 @app.post("/get_profession_info/")
-async def get_profession_info(request: ProfessionRequest) -> LLMResponse:
-    """Получает подробную информацию о профессии через RAG систему"""
-    # Формируем запрос для получения подробной информации о профессии
+async def get_profession_info(_request: ProfessionRequest):
+    return _gone()
 
-    response = await Model.go_rag(profession_name=request.profession_name, user_id=request.user_id)
-
-    user_metadata = Model.user_metadata.get(request.user_id, {})
-    ai_recommendation_json = user_metadata.get('ai_recommendation_json')
-    professions = None
-
-    if ai_recommendation_json:
-        professions = ai_recommendation_json['professions']
-
-    return LLMResponse(msg=response, professions=professions)
 
 @app.post("/get_profession_roadmap/")
-async def get_profession_roadmap(request: ProfessionRequest) -> LLMResponse:
-    """Получает подробную информацию о профессии через RAG систему"""
-    # Формируем запрос для получения подробной информации о профессии
+async def get_profession_roadmap(_request: ProfessionRequest):
+    return _gone()
 
-    response = await Model.go_rag_roadmap(profession_name=request.profession_name, user_id=request.user_id)
-
-    user_metadata = Model.user_metadata.get(request.user_id, {})
-    ai_recommendation_json = user_metadata.get('ai_recommendation_json')
-    professions = None
-
-    if ai_recommendation_json:
-        professions = ai_recommendation_json['professions']
-
-    return LLMResponse(msg=response, professions=professions)
 
 @app.post("/clean_history/")
-async def clean_history(context: Context):
-    user_id = context.user_id
-    await Model.clean_user_history(user_id=user_id)
-    return LLMResponse(msg=f'История общения и все метаданные о пользователе {user_id} удалены')
+async def clean_history(_context: Context):
+    return _gone()
 
 
+@app.post("/finish_test_early/")
+async def finish_test_early(_context: Context):
+    return _gone()

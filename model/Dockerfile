@@ -27,11 +27,9 @@ COPY model/ ./model/
 
 COPY ./repo/ ./model/repo/
 
-# Копируем необходимые модули из корня проекта
-# professions_vector_index нужен для RAG поиска
-COPY professions_vector_index/ ./professions_vector_index/
+COPY common/ ./common/
 
-# data нужна для векторных индексов и образовательных данных
+# data нужна для образовательных JSON (роудмап и т.д.)
 COPY data/ ./data/
 
 # Создаем директорию для логов и временных файлов

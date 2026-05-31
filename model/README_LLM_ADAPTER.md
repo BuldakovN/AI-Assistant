@@ -6,6 +6,7 @@
 
 - **Yandex Cloud** (по умолчанию) - через Yandex Cloud ML SDK
 - **OpenAI** - через Langchain
+- **OpenRouter** - через Langchain (`ChatOpenAI` + OpenRouter API base URL)
 - **Anthropic (Claude)** - через Langchain
 - **Google (Gemini)** - через Langchain
 
@@ -19,6 +20,14 @@
 # Для OpenAI
 export LLM_PROVIDER=openai
 export OPENAI_API_KEY=your_api_key
+
+# Для OpenRouter
+export LLM_PROVIDER=openrouter
+export OPENROUTER_API_KEY=your_api_key
+# Опционально:
+# export OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+# export OPENROUTER_HTTP_REFERER=https://your-app-url.example
+# export OPENROUTER_X_TITLE=AI-Gigaschool
 
 # Для Anthropic
 export LLM_PROVIDER=anthropic
@@ -36,31 +45,19 @@ export YANDEX_CLOUD_API_KEY=your_api_key
 
 ### Программная настройка
 
-Вы можете указать провайдер при создании экземпляра `Model`:
+Провайдер задаётся через ``model.llm_adapter.create_llm_adapter`` (все пути — LangChain, включая Yandex):
 
 ```python
-from start_llm import Model
+from model.llm_adapter import create_llm_adapter
 
-# Использование OpenAI
-model = Model(
-    llm_provider="openai",
-    api_key="your_openai_api_key",
-    model_name="gpt-4o-mini"  # опционально
-)
+# Yandex (по умолчанию в llm-service через LLM_PROVIDER=yandex)
+adapter = create_llm_adapter("yandex", folder_id="...", api_key="...")
 
-# Использование Anthropic
-model = Model(
-    llm_provider="anthropic",
-    api_key="your_anthropic_api_key",
-    model_name="claude-3-5-sonnet-20241022"  # опционально
-)
+# OpenAI
+adapter = create_llm_adapter("openai", model_name="gpt-4o-mini", api_key="...")
 
-# Использование Google
-model = Model(
-    llm_provider="google",
-    api_key="your_google_api_key",
-    model_name="gemini-pro"  # опционально
-)
+# OpenRouter
+adapter = create_llm_adapter("openrouter", model_name="openai/gpt-4o-mini", api_key="...")
 ```
 
 ## Архитектура
@@ -74,7 +71,7 @@ model = Model(
 
 2. **YandexAdapter** - реализация для Yandex Cloud ML SDK
 
-3. **LangchainAdapter** - реализация для Langchain провайдеров (OpenAI, Anthropic, Google)
+3. **LangchainAdapter** - реализация для Langchain провайдеров (OpenAI, OpenRouter, Anthropic, Google, Mistral)
 
 4. **create_llm_adapter()** - фабрика для создания нужного адаптера
 

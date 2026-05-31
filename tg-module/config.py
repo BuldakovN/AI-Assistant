@@ -14,6 +14,9 @@ class BotConfig:
     def __init__(self):
         # Токен бота - должен быть установлен в переменных окружения
         self.bot_token: str = os.getenv('TELEGRAM_BOT_TOKEN', '')
+        self.proxy: str = os.getenv('TELEGRAM_PROXY', None)
+
+        print('Proxy:', bool(self.proxy))
         
         # Настройки для работы с LLM (API из папки model)
         self.llm_base_url: str = os.getenv('LLM_BASE_URL', 'http://localhost:8000')
